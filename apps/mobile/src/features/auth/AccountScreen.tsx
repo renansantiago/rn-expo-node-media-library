@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
+import { Screen } from '../../components/Screen';
 import { EmptyView } from '../../components/StateViews';
 import { colors, spacing } from '../../components/theme';
 import { useAuth } from './AuthProvider';
@@ -20,7 +21,7 @@ export function AccountScreen({ onSignedOut }: { onSignedOut: () => void }) {
   };
 
   return (
-    <View style={styles.screen}>
+    <Screen style={styles.screen}>
       <Text style={styles.name}>{user.displayName}</Text>
       <Text style={styles.detail}>@{user.username}</Text>
       <Text style={styles.detail}>Plan: {PLAN_LABEL[user.tier]}</Text>
@@ -32,12 +33,12 @@ export function AccountScreen({ onSignedOut }: { onSignedOut: () => void }) {
           loading={signingOut}
         />
       </View>
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, padding: spacing.xl, gap: spacing.sm, backgroundColor: colors.background },
+  screen: { padding: spacing.xl, gap: spacing.sm },
   name: { fontSize: 22, fontWeight: '700', color: colors.text },
   detail: { fontSize: 16, color: colors.textMuted },
   action: { marginTop: spacing.xl },

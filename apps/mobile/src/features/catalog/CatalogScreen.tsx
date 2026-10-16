@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../components/Button';
+import { Screen } from '../../components/Screen';
 import { EmptyView, ErrorView, LoadingView } from '../../components/StateViews';
 import { colors, spacing } from '../../components/theme';
 import { toUserFacingError } from '../../lib/user-facing-error';
@@ -16,6 +18,7 @@ export function CatalogScreen({ onOpenItem }: Props) {
   const [category, setCategory] = useState<string | null>(null);
   const categories = useCategories();
   const catalog = useCatalogItems(category);
+  const insets = useSafeAreaInsets();
 
   const items = catalog.data?.pages.flatMap((page) => page.data) ?? [];
 
@@ -55,7 +58,10 @@ export function CatalogScreen({ onOpenItem }: Props) {
             onRetry={() => void catalog.fetchNextPage()}
           />
         }
-        contentContainerStyle={!items.length ? styles.emptyContainer : undefined}
+        contentContainerStyle={[
+          { paddingBottom: insets.bottom },
+          !items.length && styles.emptyContainer,
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={catalog.isRefetching && !catalog.isFetchingNextPage}
@@ -68,12 +74,12 @@ export function CatalogScreen({ onOpenItem }: Props) {
   }
 
   return (
-    <View style={styles.screen}>
+    <Screen scrollable>
       {categories.data?.length ? (
         <CategoryFilter categories={categories.data} selected={category} onSelect={setCategory} />
       ) : null}
       {body}
-    </View>
+    </Screen>
   );
 }
 
@@ -109,7 +115,6 @@ function Separator() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
   list: { flex: 1 },
   emptyContainer: { flexGrow: 1 },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 156 },

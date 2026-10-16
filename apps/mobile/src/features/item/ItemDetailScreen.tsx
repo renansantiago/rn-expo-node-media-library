@@ -1,6 +1,8 @@
 import { canWatch, type Item, type User } from '@media-library/contracts';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../components/Button';
+import { Screen } from '../../components/Screen';
 import { ErrorView, LoadingView } from '../../components/StateViews';
 import { TierBadge } from '../../components/TierBadge';
 import { colors, spacing } from '../../components/theme';
@@ -18,6 +20,7 @@ interface Props {
 export function ItemDetailScreen({ itemId, onPlay, onSignIn }: Props) {
   const { data: item, error, isPending, refetch } = useItem(itemId);
   const { status, user } = useAuth();
+  const insets = useSafeAreaInsets();
 
   if (isPending) return <LoadingView label="Loading details" />;
   if (!item) {
@@ -25,34 +28,36 @@ export function ItemDetailScreen({ itemId, onPlay, onSignIn }: Props) {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      {item.thumbnailUrl ? (
-        <Image
-          source={{ uri: item.thumbnailUrl }}
-          style={styles.hero}
-          accessibilityIgnoresInvertColors
-        />
-      ) : (
-        <View style={styles.hero} />
-      )}
-      <View style={styles.body}>
-        <Text style={styles.title} accessibilityRole="header">
-          {item.title}
-        </Text>
-        <Text style={styles.meta}>
-          {item.category.name} · {formatDuration(item.durationSec)}
-        </Text>
-        <TierBadge tier={item.requiredTier} />
-        <PlayAction
-          item={item}
-          status={status}
-          user={user}
-          onPlay={() => onPlay(item.id)}
-          onSignIn={onSignIn}
-        />
-        <Text style={styles.description}>{item.description}</Text>
-      </View>
-    </ScrollView>
+    <Screen scrollable>
+      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xl + insets.bottom }}>
+        {item.thumbnailUrl ? (
+          <Image
+            source={{ uri: item.thumbnailUrl }}
+            style={styles.hero}
+            accessibilityIgnoresInvertColors
+          />
+        ) : (
+          <View style={styles.hero} />
+        )}
+        <View style={styles.body}>
+          <Text style={styles.title} accessibilityRole="header">
+            {item.title}
+          </Text>
+          <Text style={styles.meta}>
+            {item.category.name} · {formatDuration(item.durationSec)}
+          </Text>
+          <TierBadge tier={item.requiredTier} />
+          <PlayAction
+            item={item}
+            status={status}
+            user={user}
+            onPlay={() => onPlay(item.id)}
+            onSignIn={onSignIn}
+          />
+          <Text style={styles.description}>{item.description}</Text>
+        </View>
+      </ScrollView>
+    </Screen>
   );
 }
 
@@ -82,8 +87,6 @@ function PlayAction({ item, status, user, onPlay, onSignIn }: PlayActionProps) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
-  content: { paddingBottom: spacing.xl },
   hero: { width: '100%', aspectRatio: 16 / 9, backgroundColor: colors.surface },
   body: { padding: spacing.lg, gap: spacing.md },
   title: { fontSize: 24, fontWeight: '700', color: colors.text },

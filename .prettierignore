@@ -4,3 +4,5 @@ coverage
 apps/api/drizzle
 package-lock.json
 .expo
+# Rewritten by `expo start` in its own format
+apps/mobile/tsconfig.json

@@ -39,11 +39,11 @@ export function CategoryFilter({ categories, selected, onSelect }: Props) {
 
 const styles = StyleSheet.create({
   scroll: { flexGrow: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-  container: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, gap: spacing.sm },
+  container: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: spacing.sm },
   chip: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderRadius: 16,
+    paddingVertical: spacing.sm,
+    borderRadius: 18,
     backgroundColor: colors.surface,
   },
   chipActive: { backgroundColor: colors.accent },

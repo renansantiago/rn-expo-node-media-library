@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '../../components/Button';
+import { Screen } from '../../components/Screen';
 import { colors, spacing } from '../../components/theme';
 import { HttpError } from '../../lib/api';
 import { toUserFacingError } from '../../lib/user-facing-error';
@@ -38,56 +39,58 @@ export function LoginScreen({ onSuccess }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={styles.form}>
-        <Text style={styles.label}>Username</Text>
-        <TextInput
-          accessibilityLabel="Username"
-          value={username}
-          onChangeText={setUsername}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="username"
-          textContentType="username"
-          returnKeyType="next"
-          style={styles.input}
-        />
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          accessibilityLabel="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          autoComplete="password"
-          textContentType="password"
-          returnKeyType="go"
-          onSubmitEditing={() => void submit()}
-          style={styles.input}
-        />
-        {error ? (
-          <Text style={styles.error} accessibilityRole="alert">
-            {error}
+    <Screen>
+      <KeyboardAvoidingView
+        style={styles.keyboard}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.form}>
+          <Text style={styles.label}>Username</Text>
+          <TextInput
+            accessibilityLabel="Username"
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
+            textContentType="username"
+            returnKeyType="next"
+            style={styles.input}
+          />
+          <Text style={styles.label}>Password</Text>
+          <TextInput
+            accessibilityLabel="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            autoComplete="password"
+            textContentType="password"
+            returnKeyType="go"
+            onSubmitEditing={() => void submit()}
+            style={styles.input}
+          />
+          {error ? (
+            <Text style={styles.error} accessibilityRole="alert">
+              {error}
+            </Text>
+          ) : null}
+          <Button
+            title="Sign in"
+            onPress={() => void submit()}
+            disabled={!canSubmit}
+            loading={submitting}
+          />
+          <Text style={styles.hint}>
+            Demo accounts: free-user and premium-user (password set in the API configuration).
           </Text>
-        ) : null}
-        <Button
-          title="Sign in"
-          onPress={() => void submit()}
-          disabled={!canSubmit}
-          loading={submitting}
-        />
-        <Text style={styles.hint}>
-          Demo accounts: free-user and premium-user (password set in the API configuration).
-        </Text>
-      </View>
-    </KeyboardAvoidingView>
+        </View>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
+  keyboard: { flex: 1 },
   form: { padding: spacing.xl, gap: spacing.sm },
   label: { fontSize: 14, fontWeight: '600', color: colors.text, marginTop: spacing.sm },
   input: {

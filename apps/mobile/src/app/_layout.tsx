@@ -6,7 +6,9 @@ export default function RootLayout() {
   return (
     <AppProviders>
       <StatusBar style="auto" />
-      <Stack>
+      {/* iOS 26 defaults to a translucent Liquid Glass header that content scrolls under; keep it
+          opaque so every screen lays out below it. */}
+      <Stack screenOptions={{ headerTransparent: false }}>
         <Stack.Screen name="index" options={{ title: 'Catalog' }} />
         <Stack.Screen name="items/[id]" options={{ title: '' }} />
         <Stack.Screen
