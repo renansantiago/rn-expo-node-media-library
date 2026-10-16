@@ -12,6 +12,9 @@ import { createAuthService } from './modules/auth/service';
 import { catalogRoutes } from './modules/catalog/routes';
 import { createCatalogRepository } from './modules/catalog/repository';
 import { healthRoutes } from './modules/health/routes';
+import { createProgressRepository } from './modules/progress/repository';
+import { progressRoutes } from './modules/progress/routes';
+import { createProgressService } from './modules/progress/service';
 import { authPlugin } from './plugins/auth';
 import { correlationIdPlugin, resolveCorrelationId } from './plugins/correlation-id';
 import { errorHandlerPlugin } from './plugins/error-handler';
@@ -19,7 +22,7 @@ import { errorHandlerPlugin } from './plugins/error-handler';
 export interface AppDeps {
   config: Pick<Config, 'LOG_LEVEL' | 'LOG_PRETTY' | 'AUTH_TOKEN_TTL_HOURS'>;
   db: Db;
-  /** Injectable clock (tests use it to exercise token expiry). */
+  /** Injectable clock (tests use it to exercise token expiry and the clock-skew guard). */
   now?: () => Date;
 }
 
@@ -58,7 +61,16 @@ export async function buildApp({ config, db, now }: AppDeps) {
 
   await app.register(healthRoutes, { db });
   await app.register(authRoutes, { prefix: '/v1', authService });
-  await app.register(catalogRoutes, { prefix: '/v1', repository: createCatalogRepository(db) });
+  const catalogRepository = createCatalogRepository(db);
+  await app.register(catalogRoutes, { prefix: '/v1', repository: catalogRepository });
+  await app.register(progressRoutes, {
+    prefix: '/v1',
+    progressService: createProgressService({
+      repository: createProgressRepository(db),
+      catalog: catalogRepository,
+      now,
+    }),
+  });
 
   return app;
 }

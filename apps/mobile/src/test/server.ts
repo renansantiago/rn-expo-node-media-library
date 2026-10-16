@@ -1,4 +1,11 @@
-import type { ApiErrorBody } from '@media-library/contracts';
+import {
+  isCompleted,
+  isNewerObservation,
+  ProgressBatchRequestSchema,
+  type ApiErrorBody,
+  type Progress,
+  type ProgressBatchResult,
+} from '@media-library/contracts';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { CATALOG, CATEGORIES, TEST_PASSWORD, USERS } from './fixtures';
@@ -18,7 +25,14 @@ export const apiError = (
 
 /** Tokens the fake API accepts (revocable through /logout). */
 const validTokens = new Map<string, keyof typeof USERS>();
+/** Server-side progress per user id, resolved with the same multi-device rule as the real API. */
+export const fakeProgress = new Map<string, Map<string, Progress>>();
+/** Every progress batch the fake API received (for asserting on what the app sent). */
+export const receivedBatches: unknown[][] = [];
+
 export function resetFakeApi() {
+  fakeProgress.clear();
+  receivedBatches.length = 0;
   validTokens.clear();
   validTokens.set('token-free', 'free');
   validTokens.set('token-premium', 'premium');
@@ -89,6 +103,66 @@ export const handlers = [
     const user = currentUser(request);
     return user ? HttpResponse.json({ user }) : apiError(401, 'UNAUTHORIZED');
   }),
+
+  http.get(url('/v1/me/progress'), ({ request }) => {
+    const user = currentUser(request);
+    if (!user) return apiError(401, 'UNAUTHORIZED');
+    const itemIds = new URL(request.url).searchParams.get('itemIds')?.split(',');
+    const all = [...(fakeProgress.get(user.id)?.values() ?? [])];
+    const data = itemIds ? all.filter((p) => itemIds.includes(p.itemId)) : all;
+    return HttpResponse.json({ data });
+  }),
+
+  http.post(url('/v1/me/progress/batch'), async ({ request }) => {
+    const user = currentUser(request);
+    if (!user) return apiError(401, 'UNAUTHORIZED');
+    const parsed = ProgressBatchRequestSchema.safeParse(await request.json());
+    if (!parsed.success) return apiError(400, 'VALIDATION_ERROR');
+    receivedBatches.push(parsed.data.events);
+    const states = fakeProgress.get(user.id) ?? new Map<string, Progress>();
+    fakeProgress.set(user.id, states);
+    const results = parsed.data.events.map((event): ProgressBatchResult => {
+      const item = CATALOG.find((i) => i.id === event.itemId);
+      if (!item) return { eventId: event.eventId, status: 'rejected', reason: 'unknown_item' };
+      const current = states.get(event.itemId);
+      if (current && !isNewerObservation(event, current)) {
+        return { eventId: event.eventId, status: 'stale', progress: current };
+      }
+      const progress = makeProgress(event.itemId, event.positionSec, {
+        recordedAt: event.recordedAt,
+        deviceId: event.deviceId,
+      });
+      states.set(event.itemId, progress);
+      return { eventId: event.eventId, status: 'applied', progress };
+    });
+    return HttpResponse.json({ results });
+  }),
 ];
+
+/** Canonical progress as the API would return it for a catalog item. */
+export function makeProgress(
+  itemId: string,
+  positionSec: number,
+  overrides: Partial<Progress> = {},
+): Progress {
+  const durationSec = CATALOG.find((i) => i.id === itemId)?.durationSec ?? 635;
+  return {
+    itemId,
+    positionSec,
+    durationSec,
+    completed: isCompleted(positionSec, durationSec),
+    recordedAt: new Date().toISOString(),
+    deviceId: 'other-device',
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+/** Seeds progress the "server" already has (e.g. from another device). */
+export function seedServerProgress(userId: string, progress: Progress) {
+  const states = fakeProgress.get(userId) ?? new Map<string, Progress>();
+  states.set(progress.itemId, progress);
+  fakeProgress.set(userId, states);
+}
 
 export const server = setupServer(...handlers);

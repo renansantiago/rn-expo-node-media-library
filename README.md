@@ -4,7 +4,7 @@ A small media library product with two parts. The **mobile app** (Expo / React N
 
 The focus is correctness, reliability and operational quality, not visual design.
 
-> **Status:** Phases 1–2 are done: the foundation, plus catalog browsing (pagination, category filter, details), token auth and entitlement-checked playback. See [Roadmap](#roadmap) for what comes next.
+> **Status:** Phases 1–3 are done: the foundation; catalog browsing (pagination, category filter, details), token auth and entitlement-checked playback; and playback progress with resume, offline-first saving, idempotent sync and a multi-device rule. See [Roadmap](#roadmap) for what comes next.
 
 ---
 
@@ -19,18 +19,18 @@ apps/
       config.ts        environment parsed and validated with zod (fail fast)
       plugins/         correlation-id, error-handler, auth (bearer tokens)
       lib/             errors, password hashing, token helpers
-      modules/         feature modules (health, catalog, auth): routes + service + repository
+      modules/         feature modules (health, catalog, auth, progress): routes + service + repository
       db/              schema, client, migrator, seed, maintenance CLI
     drizzle/           generated SQL migrations (committed)
     test/              integration tests (in-memory SQLite per test)
   mobile/              Expo app (TypeScript, Expo Router)
     src/
       app/             routes (screens) only
-      features/        feature code (catalog, item, player, auth): data hooks + screens
-      lib/             api client, logger, config, storage, formatting, error mapping
-      providers/       app-wide providers (query client, api client, auth session)
+      features/        feature code (catalog, item, player, auth, progress): data hooks + screens
+      lib/             api client, logger, config, storage, on-device database, formatting, error mapping
+      providers/       app-wide providers (query client, api client, auth session, progress)
       components/      shared UI primitives
-      test/            MSW server, fixtures, render helpers
+      test/            MSW fake API, fixtures, render helpers, in-memory SQLite, fake video player
 packages/
   contracts/           zod schemas + TS types shared by the app and the API
 docs/
@@ -84,7 +84,13 @@ curl -i -H 'X-Correlation-Id: demo-12345678' 'localhost:3000/v1/items?limit=2&ca
 TOKEN=$(curl -s -X POST localhost:3000/v1/auth/login -H 'content-type: application/json' \
   -d '{"username":"free-user","password":"demo-password"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
 curl -s -H "Authorization: Bearer $TOKEN" localhost:3000/v1/items/00000000-0000-4000-8000-000000000003/playback  # 403: premium item
+ITEM=00000000-0000-4000-8000-000000000001
+curl -s -X PUT localhost:3000/v1/me/progress/$ITEM -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d "{\"eventId\":\"$(node -pe 'crypto.randomUUID()')\",\"positionSec\":120,\"recordedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"deviceId\":\"curl-device\"}"
+curl -s -H "Authorization: Bearer $TOKEN" localhost:3000/v1/me/progress   # recently watched
 ```
+
+To see the multi-device rule in the app, sign in as the same user on two simulators (or a simulator and a device). Watch a video on one, leave the player, then open the same video on the other: it offers to resume where the first device stopped.
 
 ## Scripts (repository root)
 
@@ -145,22 +151,32 @@ Key decisions, with full rationale in [ADR 0001](docs/adr/0001-monorepo-and-stac
   - The stream URL is never part of the catalog. It is only returned by `/v1/items/:id/playback`, after checking that the user's tier covers the item (`canWatch` lives in the shared contracts). It is sent with `Cache-Control: no-store`.
   - The app keeps the session in the platform keychain/keystore (`expo-secure-store`) and attaches the token to requests.
   - When an authenticated request gets a 401, the app drops the session and clears every user-scoped cache entry (stream URLs). A failed profile refresh while offline keeps the cached session.
+- **Playback progress and the multi-device rule.** Full rationale in [ADR 0003](docs/adr/0003-progress-and-multi-device.md).
+  - **Rule:** the most recent _observation_ wins, by the device clock time it was recorded at (not arrival time). Ties go to the greater device id. A phone that syncs an hour-old offline session cannot overwrite what a tablet watched since. Rewinding is allowed when it is newer.
+  - **Atomic and idempotent:** the API applies the rule in one SQL upsert. Each event carries a client UUID, so retries and replays are acknowledged as `duplicate` without being applied twice. Every write returns the canonical state.
+  - **Guards:** events stamped more than 5 minutes ahead of the server clock are rejected (`422 CLOCK_SKEW`). Positions are clamped to the item's duration, and the item must be in the user's plan.
+  - **Local first:** the app writes every save to on-device SQLite (`expo-sqlite`) and an outbox in one transaction, then syncs through the batch endpoint. The outbox keeps one pending event per item, retries with capped, jittered backoff, and only forgets an event once the server has resolved it.
+  - **When it saves:** every 10 s while playing, on pause, after a seek, at the end, when the app is backgrounded, and when the player closes. It flushes on launch, sign-in and return to foreground.
+  - **Resume:** the player briefly pulls the server's latest position (3 s timeout), merges it under the same rule, and resumes from the winner. It falls back to local state when offline, and starts over below 5 s or once 95% has been watched.
 - **Keyset pagination.** The catalog is ordered by `(created_at DESC, id DESC)` and paginated with an opaque cursor (base64url of the last row's position). Unlike `OFFSET`, pages stay stable while items are inserted, and each page costs O(limit) thanks to composite indexes. Malformed cursors return 400.
 - **Liveness vs readiness.** `/health` reports that the process is up. `/ready` checks the database and returns 503 when it is unavailable.
 
 ## API (current)
 
-| Method | Path                     | Auth   | Description                                                                                                                       |
-| ------ | ------------------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/health`                | –      | Liveness                                                                                                                          |
-| GET    | `/ready`                 | –      | Readiness (database check)                                                                                                        |
-| GET    | `/v1/categories`         | –      | All categories, alphabetical                                                                                                      |
-| GET    | `/v1/items`              | –      | Catalog, newest first. `limit` 1–50 (default 20), `cursor` (from `nextCursor`), `category` (slug). Returns `{ data, nextCursor }` |
-| GET    | `/v1/items/:id`          | –      | Item metadata and duration                                                                                                        |
-| GET    | `/v1/items/:id/playback` | Bearer | Stream URL, only if the user's tier covers the item (401 without a valid token, 403 if not entitled)                              |
-| POST   | `/v1/auth/login`         | –      | `{ username, password }` → `{ token, expiresAt, user }`                                                                           |
-| POST   | `/v1/auth/logout`        | Bearer | Revokes the token (204)                                                                                                           |
-| GET    | `/v1/me`                 | Bearer | Current user                                                                                                                      |
+| Method | Path                     | Auth   | Description                                                                                                                            |
+| ------ | ------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/health`                | –      | Liveness                                                                                                                               |
+| GET    | `/ready`                 | –      | Readiness (database check)                                                                                                             |
+| GET    | `/v1/categories`         | –      | All categories, alphabetical                                                                                                           |
+| GET    | `/v1/items`              | –      | Catalog, newest first. `limit` 1–50 (default 20), `cursor` (from `nextCursor`), `category` (slug). Returns `{ data, nextCursor }`      |
+| GET    | `/v1/items/:id`          | –      | Item metadata and duration                                                                                                             |
+| GET    | `/v1/items/:id/playback` | Bearer | Stream URL, only if the user's tier covers the item (401 without a valid token, 403 if not entitled)                                   |
+| POST   | `/v1/auth/login`         | –      | `{ username, password }` → `{ token, expiresAt, user }`                                                                                |
+| POST   | `/v1/auth/logout`        | Bearer | Revokes the token (204)                                                                                                                |
+| GET    | `/v1/me`                 | Bearer | Current user                                                                                                                           |
+| GET    | `/v1/me/progress`        | Bearer | Progress for `itemIds` (comma-separated, max 100), or the most recently watched items (`limit` 1–100, default 20)                      |
+| PUT    | `/v1/me/progress/:id`    | Bearer | One event `{ eventId, positionSec, recordedAt, deviceId }` → `{ status: applied/stale/duplicate, progress }`. 404/403/422 on rejection |
+| POST   | `/v1/me/progress/batch`  | Bearer | 1–100 events (each with `itemId`) → per-event `{ eventId, status, progress \| reason }`, in request order                              |
 
 Errors always look like:
 
@@ -177,12 +193,22 @@ Errors always look like:
 
 ## Data model (current)
 
-| Table         | Columns                                                                                                                                                   | Notes                                                                                                           |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `categories`  | `id` PK, `slug` unique, `name`                                                                                                                            |                                                                                                                 |
-| `items`       | `id` PK (uuid), `title`, `description`, `category_id` FK, `duration_sec`, `thumbnail_url`, `stream_url`, `required_tier` (`free`/`premium`), `created_at` | Indexed on `(created_at, id)` and `(category_id, created_at, id)` for keyset pagination and the category filter |
-| `users`       | `id` PK, `username` unique, `display_name`, `tier` (`free`/`premium`), `password_hash` (`scrypt$salt$hash`), `created_at`                                 |                                                                                                                 |
-| `auth_tokens` | `token_hash` PK (SHA-256 of the bearer token), `user_id` FK (cascade), `created_at`, `expires_at`                                                         | Expired tokens are rejected and purged on login; indexed on `user_id` and `expires_at`                          |
+| Table               | Columns                                                                                                                                                   | Notes                                                                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `categories`        | `id` PK, `slug` unique, `name`                                                                                                                            |                                                                                                                                               |
+| `items`             | `id` PK (uuid), `title`, `description`, `category_id` FK, `duration_sec`, `thumbnail_url`, `stream_url`, `required_tier` (`free`/`premium`), `created_at` | Indexed on `(created_at, id)` and `(category_id, created_at, id)` for keyset pagination and the category filter                               |
+| `users`             | `id` PK, `username` unique, `display_name`, `tier` (`free`/`premium`), `password_hash` (`scrypt$salt$hash`), `created_at`                                 |                                                                                                                                               |
+| `auth_tokens`       | `token_hash` PK (SHA-256 of the bearer token), `user_id` FK (cascade), `created_at`, `expires_at`                                                         | Expired tokens are rejected and purged on login; indexed on `user_id` and `expires_at`                                                        |
+| `playback_progress` | PK (`user_id`, `item_id`), `position_sec`, `client_recorded_at`, `device_id`, `last_event_id`, `updated_at`                                               | Canonical position. Only replaced by a newer observation (`client_recorded_at`, then `device_id`). Indexed on `(user_id, client_recorded_at)` |
+| `progress_events`   | PK (`user_id`, `event_id`), `item_id`, `position_sec`, `client_recorded_at`, `device_id`, `received_at`, `outcome` (`applied`/`stale`)                    | Idempotency ledger and audit trail of every distinct event                                                                                    |
+
+On the device, the app keeps its own SQLite database (`expo-sqlite`), migrated with `PRAGMA user_version` (see `apps/mobile/src/lib/db/database.ts`):
+
+| Table      | Columns                                                                                                                        | Notes                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `progress` | PK (`user_id`, `item_id`), `position_sec`, `duration_sec`, `recorded_at`, `device_id`                                          | What the player resumes from; server state is merged in under the same rule |
+| `outbox`   | PK (`user_id`, `item_id`), `event_id`, `position_sec`, `recorded_at`, `device_id`, `attempts`, `next_attempt_at`, `last_error` | One pending event per item; removed only once the server resolves it        |
+| `meta`     | `key` PK, `value`                                                                                                              | The per-install `device_id`                                                 |
 
 Migrations live in `apps/api/drizzle/`. They are generated from `src/db/schema.ts` with `npm run db:generate -w @media-library/api` and applied automatically on server start (or with `db:migrate`). The seed uses publicly hosted sample HLS/MP4 streams, and several items share a stream on purpose. Item IDs are stable across resets.
 
@@ -198,16 +224,21 @@ npm run test:coverage -w @media-library/mobile     # app with coverage threshold
   - health and readiness (including DB failure), the error envelope, correlation-ID propagation, and not leaking internals;
   - pagination: walking every page exactly once, timestamp ties, inserts between pages, malformed cursors, the category filter;
   - auth: login, generic errors, body validation, token hashing, expiry and purge, logout revocation;
-  - entitlements: 401, 403, and free and premium users playing free and premium items.
+  - entitlements: 401, 403, and free and premium users playing free and premium items;
+  - progress: first write, replayed event ids (single and whole batch), older events arriving late, rewinds, timestamp tie-break in both arrival orders, clock-skew rejection and tolerance, clamping, 30 concurrent writes converging on the newest, per-user idempotency, the audit trail, mixed batch outcomes in order, batch size limits, listing and filtering, and a two-device offline scenario.
 - **Mobile (Jest + jest-expo + React Native Testing Library + MSW).**
   - Screen tests render real providers with the real API client against a stateful MSW fake of the API (same contracts). They cover:
     - catalog: success, empty, server error with retry, timeout, offline, contract violation, infinite scroll, load-more failure with retry, category filter;
     - item detail: signed-out, entitled and not-entitled states;
-    - player: playing, 403, signed out;
+    - player: playing, 403, signed out, resuming from another device's position, a newer unsynced local position beating an older server one, starting over after the end, storage unavailable, stream errors, saving and syncing while watching;
+    - progress in the UI: resume button and time left on the detail screen, progress bars on catalog rows;
+    - progress provider: delivering events queued before the app closed, catching up on return to foreground, staying quiet while signed out, storage failures;
     - login: success, wrong credentials, connectivity;
     - account and sign-out;
     - session: restore, refresh, offline and 401 handling.
-  - Unit tests cover the API client (timeouts, cancellation, error mapping, header propagation), the retry policy, the logger, config resolution and formatting.
+  - The local store, migrations and sync engine run against **real SQLite** (in-memory `better-sqlite3` behind the same interface as `expo-sqlite`), so the SQL that ships is the SQL under test. They cover coalescing, strictly increasing timestamps, merging server state under the rule, acknowledging only the delivered event, backoff and retry timers, offline/5xx/429/401/400 handling, single-flight flushing, batching over 100 events and pulling other devices' progress.
+  - The progress tracker is tested with a scriptable fake player and fake timers: interval saves only while playing, pause, seek, end, background, unmount, de-duplication, and ignoring time updates until the resume seek lands.
+  - Unit tests cover the API client (timeouts, cancellation, error mapping, header propagation), the retry policy, the logger, config resolution, formatting and the resume rule.
   - Unhandled network requests fail the test.
 - **CI.** GitHub Actions runs lint, format, typecheck, both suites with coverage thresholds, and the API production build.
 
@@ -217,6 +248,6 @@ npm run test:coverage -w @media-library/mobile     # app with coverage threshold
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
 | 1     | Foundation: monorepo, contracts, API skeleton (config, logging, correlation IDs, errors, health, DB + migrations + seed), catalog first page, app skeleton (API client, catalog screen), tests, CI | ✅     |
 | 2     | Catalog and auth: cursor pagination, category filter, item detail, token auth, entitlement-checked playback endpoint, basic player                                                                 | ✅     |
-| 3     | Playback and progress: player with resume, progress tracking across background and interruptions, idempotent writes, multi-device rule                                                             | ⏳     |
-| 4     | Offline and observability: persisted catalog cache, offline outbox sync, metrics endpoint, documented cache policy and failure modes                                                               | ⏳     |
+| 3     | Playback and progress: player with resume, progress tracking across background and interruptions, idempotent writes, multi-device rule, on-device progress store and sync outbox                   | ✅     |
+| 4     | Offline and observability: persisted catalog cache, network awareness (offline banner, sync on reconnect), metrics endpoint, documented cache policy and failure modes                             | ⏳     |
 | 5     | Optional: rate limiting, contract tests, TV form-factor plan                                                                                                                                       | ⏳     |

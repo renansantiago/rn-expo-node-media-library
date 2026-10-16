@@ -1,6 +1,7 @@
 import { fireEvent, screen } from '@testing-library/react-native';
-import { FREE_ITEM, itemId, PREMIUM_ITEM } from '../../test/fixtures';
+import { FREE_ITEM, itemId, PREMIUM_ITEM, USERS } from '../../test/fixtures';
 import { renderWithProviders } from '../../test/render';
+import { makeProgress, seedServerProgress } from '../../test/server';
 import { ItemDetailScreen } from './ItemDetailScreen';
 
 function renderDetail(id: string, signedInAs?: 'free' | 'premium') {
@@ -47,5 +48,24 @@ describe('ItemDetailScreen', () => {
     const { result } = renderDetail(itemId(9999));
     await result;
     expect(await screen.findByText('Not found')).toBeOnTheScreen();
+  });
+
+  it('offers to resume where the user left off on any device', async () => {
+    seedServerProgress(USERS.free.id, makeProgress(FREE_ITEM.id, 300));
+    const { onPlay, result } = renderDetail(FREE_ITEM.id, 'free');
+    await result;
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Resume from 5:00' }));
+    expect(onPlay).toHaveBeenCalledWith(FREE_ITEM.id);
+    expect(screen.getByText('5:35 left')).toBeOnTheScreen();
+    expect(screen.getByLabelText('Watched 5:00 of 10:35')).toBeOnTheScreen();
+  });
+
+  it('offers a plain Play once the video was watched to the end', async () => {
+    seedServerProgress(USERS.free.id, makeProgress(FREE_ITEM.id, FREE_ITEM.durationSec));
+    const { result } = renderDetail(FREE_ITEM.id, 'free');
+    await result;
+    expect(await screen.findByRole('button', { name: 'Play' })).toBeOnTheScreen();
+    expect(screen.queryByText(/left$/)).toBeNull();
   });
 });

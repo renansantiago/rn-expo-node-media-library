@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import { createSessionStore, type SessionStore } from '../features/auth/session';
+import { ProgressProvider } from '../features/progress/ProgressProvider';
 import {
   ApiClientProvider,
   createApiClient,
@@ -10,6 +11,7 @@ import {
   type ApiClientOptions,
 } from '../lib/api';
 import { config } from '../lib/config';
+import { openAppDatabase, type SqlDatabase } from '../lib/db/database';
 import { logger } from '../lib/logger';
 import { createQueryClient } from '../lib/query-client';
 import { secureStore, type KeyValueStore } from '../lib/storage/key-value-store';
@@ -20,6 +22,7 @@ interface Props {
   createClient?: (session: SessionStore) => ApiClient;
   queryClient?: QueryClient;
   storage?: KeyValueStore;
+  openDatabase?: () => Promise<SqlDatabase>;
 }
 
 /** API client wired to the session: attaches the token and drops the session on 401. */
@@ -52,6 +55,7 @@ export function AppProviders({
   createClient = defaultCreateClient,
   queryClient,
   storage = secureStore,
+  openDatabase = openAppDatabase,
 }: Props) {
   const [sessionStore] = useState(() => createSessionStore());
   const [client] = useState(() => createClient(sessionStore));
@@ -62,7 +66,7 @@ export function AppProviders({
       <QueryClientProvider client={queries}>
         <ApiClientProvider client={client}>
           <AuthProvider sessionStore={sessionStore} storage={storage}>
-            {children}
+            <ProgressProvider openDatabase={openDatabase}>{children}</ProgressProvider>
           </AuthProvider>
         </ApiClientProvider>
       </QueryClientProvider>

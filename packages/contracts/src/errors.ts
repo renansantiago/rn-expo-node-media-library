@@ -6,6 +6,7 @@ export const ErrorCodeSchema = z.enum([
   'FORBIDDEN',
   'NOT_FOUND',
   'CONFLICT',
+  'CLOCK_SKEW',
   'RATE_LIMITED',
   'INTERNAL_ERROR',
   'SERVICE_UNAVAILABLE',

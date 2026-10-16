@@ -1,8 +1,14 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import { delay, http, HttpResponse } from 'msw';
-import { CATALOG, makeItem } from '../../test/fixtures';
+import { CATALOG, makeItem, USERS } from '../../test/fixtures';
 import { renderWithProviders } from '../../test/render';
-import { apiError, server, TEST_API_URL } from '../../test/server';
+import {
+  apiError,
+  makeProgress,
+  seedServerProgress,
+  server,
+  TEST_API_URL,
+} from '../../test/server';
 import { CatalogScreen } from './CatalogScreen';
 
 const itemsUrl = `${TEST_API_URL}/v1/items`;
@@ -136,5 +142,16 @@ describe('CatalogScreen', () => {
     server.use(http.get(itemsUrl, () => HttpResponse.json({ items: 'nope' })));
     await renderCatalog();
     expect(await screen.findByText('Unexpected response')).toBeOnTheScreen();
+  });
+
+  it('shows how far the signed-in user got in each video, including on other devices', async () => {
+    const [watching, finished] = [CATALOG[0]!, CATALOG[1]!];
+    seedServerProgress(USERS.free.id, makeProgress(watching.id, 300));
+    seedServerProgress(USERS.free.id, makeProgress(finished.id, finished.durationSec));
+    await renderCatalog(jest.fn(), { signedInAs: 'free' });
+
+    expect(await screen.findByLabelText('Watched 5:00 of 10:35')).toBeOnTheScreen();
+    // A finished video shows no resume bar (it will start over).
+    expect(screen.getAllByRole('progressbar', { name: /^Watched/ })).toHaveLength(1);
   });
 });

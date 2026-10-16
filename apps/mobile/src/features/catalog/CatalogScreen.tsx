@@ -6,6 +6,7 @@ import { Screen } from '../../components/Screen';
 import { EmptyView, ErrorView, LoadingView } from '../../components/StateViews';
 import { colors, spacing } from '../../components/theme';
 import { toUserFacingError } from '../../lib/user-facing-error';
+import { useProgressMap } from '../progress/hooks';
 import { useCatalogItems, useCategories } from './api';
 import { CategoryFilter } from './components/CategoryFilter';
 import { ItemRow } from './components/ItemRow';
@@ -18,6 +19,7 @@ export function CatalogScreen({ onOpenItem }: Props) {
   const [category, setCategory] = useState<string | null>(null);
   const categories = useCategories();
   const catalog = useCatalogItems(category);
+  const progress = useProgressMap();
   const insets = useSafeAreaInsets();
 
   const items = catalog.data?.pages.flatMap((page) => page.data) ?? [];
@@ -41,7 +43,10 @@ export function CatalogScreen({ onOpenItem }: Props) {
         testID="catalog-list"
         data={items}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ItemRow item={item} onPress={onOpenItem} />}
+        renderItem={({ item }) => (
+          <ItemRow item={item} onPress={onOpenItem} progress={progress.data?.get(item.id)} />
+        )}
+        extraData={progress.data}
         ItemSeparatorComponent={Separator}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}

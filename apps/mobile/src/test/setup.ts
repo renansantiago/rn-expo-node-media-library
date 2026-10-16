@@ -1,3 +1,4 @@
+import { createdPlayers } from './fake-video-player';
 import { resetFakeApi, server } from './server';
 
 // SafeAreaProvider renders nothing until native insets arrive; use the library's static mock.
@@ -11,21 +12,16 @@ jest.mock('expo-crypto', () => ({
   randomUUID: () => jest.requireActual('node:crypto').randomUUID(),
 }));
 
-// Native video is not available under Jest: a minimal player double that is always ready.
+// Native video is not available under Jest: an always-ready player double that tests can drive.
 jest.mock('expo-video', () => {
   const { createElement, useMemo } = jest.requireActual('react');
   const { View } = jest.requireActual('react-native');
+  const { createFakeVideoPlayer, createdPlayers } = jest.requireActual('./fake-video-player');
   return {
     useVideoPlayer: (_source: unknown, setup?: (player: unknown) => void) =>
       useMemo(() => {
-        const player = {
-          status: 'readyToPlay',
-          playing: false,
-          currentTime: 0,
-          play: jest.fn(),
-          pause: jest.fn(),
-          addListener: () => ({ remove: () => undefined }),
-        };
+        const player = createFakeVideoPlayer();
+        createdPlayers.push(player);
         setup?.(player);
         return player;
         // Like the real hook: one player per mount, regardless of the inline setup callback.
@@ -50,5 +46,6 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   server.resetHandlers();
   resetFakeApi();
+  createdPlayers.length = 0;
 });
 afterAll(() => server.close());
