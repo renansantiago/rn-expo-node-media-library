@@ -45,16 +45,35 @@ The app finds the API on port 3000 of the machine running Expo. To override it, 
 
 ## Scripts and configuration
 
-`npm run verify` (lint + typecheck + test, what CI runs) · `npm test` · `npm run lint` · `npm run typecheck` · `npm run format` · `npm run db:reset`. API only (`-w @media-library/api`): `build`, `start`, `test:coverage`, `db:generate`, `db:migrate`, `db:seed`.
+```bash
+npm run verify       # lint + typecheck + test (what CI runs)
+npm test             # all test suites
+npm run lint         # ESLint
+npm run typecheck    # TypeScript, every workspace
+npm run format       # Prettier
+npm run db:reset     # recreate, migrate and seed the local database
 
-The API is configured through the environment, and every value has a safe default (see `apps/api/.env.example`). The main ones:
+# API only
+npm run build -w @media-library/api           # production build
+npm run start -w @media-library/api           # run the build
+npm run test:coverage -w @media-library/api   # tests with coverage thresholds
+npm run db:generate -w @media-library/api     # new migration from schema changes
+```
 
-- `PORT`, `HOST`, `LOG_LEVEL`, `LOG_PRETTY`, `DATABASE_PATH`.
-- `AUTH_TOKEN_TTL_HOURS` (default 168).
-- `DEMO_USER_PASSWORD`.
-- `RATE_LIMIT_WINDOW_SEC` (60), `RATE_LIMIT_LOGIN_MAX` (10) and `RATE_LIMIT_WRITE_MAX` (120).
+The API reads its configuration from the environment, and every value has a safe default. `.env` files are git-ignored; this is `apps/api/.env.example`:
 
-`.env` files are git-ignored.
+```bash
+PORT=3000
+HOST=0.0.0.0
+LOG_LEVEL=info
+LOG_PRETTY=true
+DATABASE_PATH=./data/media-library.db
+AUTH_TOKEN_TTL_HOURS=168      # token lifetime (7 days)
+DEMO_USER_PASSWORD=demo-password
+RATE_LIMIT_WINDOW_SEC=60      # window shared by both limits
+RATE_LIMIT_LOGIN_MAX=10       # login attempts per window, per (IP, username)
+RATE_LIMIT_WRITE_MAX=120      # progress writes per window, per user
+```
 
 ## Architecture and decisions
 
