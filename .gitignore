@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# build / tooling output
+dist/
+coverage/
+*.tsbuildinfo
+.turbo/
+
+# env files (only .env.example is committed)
+.env
+.env.*
+!.env.example
+
+# local SQLite databases
+apps/api/data/
+
+# Expo
+.expo/
+web-build/
+expo-env.d.ts
+apps/mobile/ios/
+apps/mobile/android/
+
+# logs / misc
+npm-debug.*
+*.log
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
