@@ -10,6 +10,7 @@ describe('loadConfig', () => {
       LOG_LEVEL: 'info',
       LOG_PRETTY: false,
       DATABASE_PATH: './data/media-library.db',
+      AUTH_TOKEN_TTL_HOURS: 168,
     });
   });
 
@@ -27,6 +28,13 @@ describe('loadConfig', () => {
       NODE_ENV: 'production',
     });
     expect(loadConfig({ LOG_PRETTY: '0' }).LOG_PRETTY).toBe(false);
+  });
+
+  it('requires demo passwords to have a minimum length', () => {
+    expect(() => loadConfig({ DEMO_USER_PASSWORD: 'short' })).toThrow(/DEMO_USER_PASSWORD/);
+    expect(loadConfig({ DEMO_USER_PASSWORD: 'long-enough' }).DEMO_USER_PASSWORD).toBe(
+      'long-enough',
+    );
   });
 
   it('fails fast with a readable message listing every invalid variable', () => {

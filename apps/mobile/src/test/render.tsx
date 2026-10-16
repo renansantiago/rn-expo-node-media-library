@@ -1,9 +1,11 @@
 import { QueryClient } from '@tanstack/react-query';
 import { render } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
-import { createApiClient } from '../lib/api';
+import { SESSION_STORAGE_KEY } from '../features/auth/session';
 import { createLogger } from '../lib/logger';
-import { AppProviders } from '../providers/AppProviders';
+import { createMemoryStore } from '../lib/storage/key-value-store';
+import { AppProviders, createSessionAwareClient } from '../providers/AppProviders';
+import { makeSession } from './fixtures';
 import { TEST_API_URL } from './server';
 
 export function createTestQueryClient() {
@@ -12,16 +14,35 @@ export function createTestQueryClient() {
   });
 }
 
-/** Renders inside the real providers, with a real API client pointed at the MSW server. */
-export function renderWithProviders(ui: ReactElement, { timeoutMs = 1_000 } = {}) {
-  const apiClient = createApiClient({
-    baseUrl: TEST_API_URL,
-    timeoutMs,
-    logger: createLogger({ minLevel: 'silent' }),
-  });
-  return render(
-    <AppProviders apiClient={apiClient} queryClient={createTestQueryClient()}>
+interface Options {
+  timeoutMs?: number;
+  /** Start signed in as this demo user (persisted session restored on mount). */
+  signedInAs?: 'free' | 'premium';
+}
+
+/** Renders inside the real providers, with a real API client pointed at the MSW fake API. */
+export async function renderWithProviders(
+  ui: ReactElement,
+  { timeoutMs = 1_000, signedInAs }: Options = {},
+) {
+  const storage = createMemoryStore(
+    signedInAs ? { [SESSION_STORAGE_KEY]: JSON.stringify(makeSession(signedInAs)) } : {},
+  );
+  const queryClient = createTestQueryClient();
+  const result = await render(
+    <AppProviders
+      storage={storage}
+      queryClient={queryClient}
+      createClient={(session) =>
+        createSessionAwareClient(session, {
+          baseUrl: TEST_API_URL,
+          timeoutMs,
+          logger: createLogger({ minLevel: 'silent' }),
+        })
+      }
+    >
       {ui}
     </AppProviders>,
   );
+  return { ...result, storage, queryClient };
 }

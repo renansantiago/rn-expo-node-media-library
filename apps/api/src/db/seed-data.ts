@@ -108,3 +108,9 @@ export function buildSeedItems(): NewItemRow[] {
     };
   });
 }
+
+/** Demo accounts: one per tier, so entitlement rules can be exercised end to end. */
+export const SEED_USERS = [
+  { id: 'user-free', username: 'free-user', displayName: 'Free Demo', tier: 'free' },
+  { id: 'user-premium', username: 'premium-user', displayName: 'Premium Demo', tier: 'premium' },
+] as const;

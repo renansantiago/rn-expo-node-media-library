@@ -22,6 +22,10 @@ export interface ApiClientOptions {
   logger: Logger;
   fetchFn?: typeof fetch;
   newCorrelationId?: () => string;
+  /** Bearer token to attach, read at request time. */
+  getAuthToken?: () => string | null | undefined;
+  /** Called with the rejected token when an authenticated request gets a 401 (expired/revoked). */
+  onUnauthorized?: (token: string) => void;
 }
 
 export interface ApiClient {
@@ -46,6 +50,8 @@ export function createApiClient({
   logger,
   fetchFn = (...args) => fetch(...args),
   newCorrelationId = newId,
+  getAuthToken,
+  onUnauthorized,
 }: ApiClientOptions): ApiClient {
   async function request<T>({
     method = 'GET',
@@ -70,6 +76,8 @@ export function createApiClient({
     if (signal?.aborted) controller.abort();
     signal?.addEventListener('abort', onExternalAbort);
 
+    const token = getAuthToken?.() ?? null;
+
     const fail = (error: Error & { kind: string }) => {
       log.warn('http.error', { kind: error.kind, durationMs: Date.now() - startedAt, err: error });
       return error;
@@ -84,6 +92,7 @@ export function createApiClient({
           headers: {
             Accept: 'application/json',
             [CORRELATION_ID_HEADER]: correlationId,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
           },
           body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -113,6 +122,7 @@ export function createApiClient({
       }
 
       if (!response.ok) {
+        if (response.status === 401 && token) onUnauthorized?.(token);
         const envelope = ApiErrorBodySchema.safeParse(json);
         throw fail(
           envelope.success

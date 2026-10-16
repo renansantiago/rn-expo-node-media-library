@@ -1,11 +1,16 @@
-import { fireEvent, screen } from '@testing-library/react-native';
+import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import { delay, http, HttpResponse } from 'msw';
+import { CATALOG, makeItem } from '../../test/fixtures';
 import { renderWithProviders } from '../../test/render';
-import { server, TEST_API_URL } from '../../test/server';
-import { makeItem } from '../../test/fixtures';
+import { apiError, server, TEST_API_URL } from '../../test/server';
 import { CatalogScreen } from './CatalogScreen';
 
 const itemsUrl = `${TEST_API_URL}/v1/items`;
+
+const renderCatalog = (
+  onOpenItem = jest.fn(),
+  options?: Parameters<typeof renderWithProviders>[1],
+) => renderWithProviders(<CatalogScreen onOpenItem={onOpenItem} />, options);
 
 describe('CatalogScreen', () => {
   it('renders catalog items with category, duration and premium badge', async () => {
@@ -20,7 +25,7 @@ describe('CatalogScreen', () => {
         }),
       ),
     );
-    await renderWithProviders(<CatalogScreen />);
+    await renderCatalog();
 
     expect(await screen.findByText('Big Buck Bunny')).toBeOnTheScreen();
     expect(screen.getByText('Animation · 10:35')).toBeOnTheScreen();
@@ -28,9 +33,64 @@ describe('CatalogScreen', () => {
     expect(screen.getAllByText('Premium')).toHaveLength(1);
   });
 
+  // FlatList virtualises rows under test, so assert on the list's data rather than off-screen rows.
+  const listedIds = () =>
+    (screen.getByTestId('catalog-list').props.data as { id: string }[]).map((i) => i.id);
+
+  it('loads the next page when the end of the list is reached', async () => {
+    await renderCatalog();
+    await screen.findByText(CATALOG[0]!.title);
+    expect(listedIds()).toEqual(CATALOG.slice(0, 20).map((i) => i.id));
+
+    await fireEvent(screen.getByTestId('catalog-list'), 'endReached');
+
+    await waitFor(() => expect(listedIds()).toEqual(CATALOG.map((i) => i.id)));
+  });
+
+  it('shows an inline retry when loading more fails, keeping loaded items', async () => {
+    let failNext = true;
+    server.use(
+      http.get(itemsUrl, ({ request }) => {
+        if (new URL(request.url).searchParams.get('cursor') && failNext) {
+          failNext = false;
+          return apiError(503, 'SERVICE_UNAVAILABLE');
+        }
+        return undefined;
+      }),
+    );
+    await renderCatalog();
+    await screen.findByText(CATALOG[0]!.title);
+
+    await fireEvent(screen.getByTestId('catalog-list'), 'endReached');
+    expect(await screen.findByText("Couldn't load more videos.")).toBeOnTheScreen();
+    expect(screen.getByText(CATALOG[0]!.title)).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(listedIds()).toHaveLength(CATALOG.length));
+  });
+
+  it('filters by category', async () => {
+    await renderCatalog();
+    await screen.findByText(CATALOG[0]!.title);
+
+    await fireEvent.press(await screen.findByRole('tab', { name: 'Sci-Fi' }));
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Sci-Fi' })).toBeSelected());
+    const sciFi = CATALOG.filter((i) => i.category.slug === 'sci-fi');
+    await waitFor(() => expect(listedIds()).toEqual(sciFi.map((i) => i.id)));
+    expect(screen.getByRole('tab', { name: 'All' })).not.toBeSelected();
+  });
+
+  it('opens an item when it is pressed', async () => {
+    const onOpenItem = jest.fn();
+    await renderCatalog(onOpenItem);
+    await fireEvent.press(await screen.findByTestId(`catalog-item-${CATALOG[0]!.id}`));
+    expect(onOpenItem).toHaveBeenCalledWith(CATALOG[0]!.id);
+  });
+
   it('shows an empty state when the catalog has no items', async () => {
     server.use(http.get(itemsUrl, () => HttpResponse.json({ data: [], nextCursor: null })));
-    await renderWithProviders(<CatalogScreen />);
+    await renderCatalog();
     expect(await screen.findByText('No videos yet')).toBeOnTheScreen();
   });
 
@@ -46,13 +106,13 @@ describe('CatalogScreen', () => {
         { once: true },
       ),
     );
-    await renderWithProviders(<CatalogScreen />);
+    await renderCatalog();
 
     expect(await screen.findByText('Server problem')).toBeOnTheScreen();
     expect(screen.getByText('Ref: abcdef12')).toBeOnTheScreen();
 
     await fireEvent.press(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByText('Item 1')).toBeOnTheScreen();
+    expect(await screen.findByText(CATALOG[0]!.title)).toBeOnTheScreen();
   });
 
   it('shows a timeout message when the API is too slow', async () => {
@@ -62,19 +122,19 @@ describe('CatalogScreen', () => {
         return HttpResponse.json({ data: [], nextCursor: null });
       }),
     );
-    await renderWithProviders(<CatalogScreen />, { timeoutMs: 50 });
+    await renderCatalog(jest.fn(), { timeoutMs: 50 });
     expect(await screen.findByText('Taking too long')).toBeOnTheScreen();
   });
 
   it('shows a connectivity message when the network fails', async () => {
     server.use(http.get(itemsUrl, () => HttpResponse.error()));
-    await renderWithProviders(<CatalogScreen />);
+    await renderCatalog();
     expect(await screen.findByText("Can't reach the server")).toBeOnTheScreen();
   });
 
   it('rejects responses that break the contract instead of rendering garbage', async () => {
     server.use(http.get(itemsUrl, () => HttpResponse.json({ items: 'nope' })));
-    await renderWithProviders(<CatalogScreen />);
+    await renderCatalog();
     expect(await screen.findByText('Unexpected response')).toBeOnTheScreen();
   });
 });

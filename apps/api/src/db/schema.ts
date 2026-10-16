@@ -33,3 +33,33 @@ export const items = sqliteTable(
 export type CategoryRow = typeof categories.$inferSelect;
 export type ItemRow = typeof items.$inferSelect;
 export type NewItemRow = typeof items.$inferInsert;
+
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  username: text('username').notNull().unique(),
+  displayName: text('display_name').notNull(),
+  tier: text('tier', { enum: ['free', 'premium'] }).notNull(),
+  /** `scrypt$<salt>$<hash>` (base64url). Plaintext passwords are never stored. */
+  passwordHash: text('password_hash').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+export const authTokens = sqliteTable(
+  'auth_tokens',
+  {
+    /** SHA-256 of the opaque bearer token; a leaked DB does not leak usable tokens. */
+    tokenHash: text('token_hash').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    index('auth_tokens_user_id_idx').on(table.userId),
+    index('auth_tokens_expires_at_idx').on(table.expiresAt),
+  ],
+);
+
+export type UserRow = typeof users.$inferSelect;
+export type NewUserRow = typeof users.$inferInsert;

@@ -11,6 +11,15 @@ const ConfigSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   LOG_PRETTY: booleanFromEnv.default(false),
   DATABASE_PATH: z.string().min(1).default('./data/media-library.db'),
+  /** Lifetime of issued bearer tokens. */
+  AUTH_TOKEN_TTL_HOURS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(24 * 90)
+    .default(24 * 7),
+  /** Password given to the seeded demo users. When unset, `db:seed` generates and prints one. */
+  DEMO_USER_PASSWORD: z.string().min(8).optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

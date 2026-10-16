@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/db/client';
 import { resolveMigrationsFolder, runMigrations } from '../src/db/migrate';
-import { categories, items } from '../src/db/schema';
+import { categories, items, users } from '../src/db/schema';
 import { seed } from '../src/db/seed';
 
 describe('database setup', () => {
@@ -28,16 +28,23 @@ describe('database setup', () => {
     }
   });
 
-  it('applies migrations idempotently and seeds without duplicating rows', () => {
+  it('applies migrations idempotently and seeds without duplicating rows', async () => {
     const handle = openDatabase(':memory:');
     try {
       runMigrations(handle.db);
       runMigrations(handle.db);
-      const first = seed(handle.db);
-      seed(handle.db);
+      const first = await seed(handle.db, { demoPassword: 'pw-12345678' });
+      await seed(handle.db, { demoPassword: 'pw-12345678' });
 
       expect(handle.db.select().from(categories).all()).toHaveLength(first.categories);
       expect(handle.db.select().from(items).all()).toHaveLength(first.items);
+      const seededUsers = handle.db.select().from(users).all();
+      expect(seededUsers).toHaveLength(first.users);
+      // Passwords are stored as salted scrypt hashes, never in plaintext.
+      for (const user of seededUsers) {
+        expect(user.passwordHash).toMatch(/^scrypt\$/);
+        expect(user.passwordHash).not.toContain('pw-12345678');
+      }
     } finally {
       handle.close();
     }

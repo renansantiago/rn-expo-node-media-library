@@ -6,7 +6,20 @@ export default function RootLayout() {
   return (
     <AppProviders>
       <StatusBar style="auto" />
-      <Stack />
+      <Stack>
+        <Stack.Screen name="index" options={{ title: 'Catalog' }} />
+        <Stack.Screen name="items/[id]" options={{ title: '' }} />
+        <Stack.Screen
+          name="player/[id]"
+          options={{
+            title: '',
+            headerStyle: { backgroundColor: '#000000' },
+            headerTintColor: '#FFFFFF',
+          }}
+        />
+        <Stack.Screen name="login" options={{ title: 'Sign in', presentation: 'modal' }} />
+        <Stack.Screen name="account" options={{ title: 'Account', presentation: 'modal' }} />
+      </Stack>
     </AppProviders>
   );
 }

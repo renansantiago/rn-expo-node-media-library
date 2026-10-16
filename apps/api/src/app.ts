@@ -6,15 +6,21 @@ import {
 } from 'fastify-type-provider-zod';
 import type { Config } from './config';
 import type { Db } from './db/client';
+import { createAuthRepository } from './modules/auth/repository';
+import { authRoutes } from './modules/auth/routes';
+import { createAuthService } from './modules/auth/service';
 import { catalogRoutes } from './modules/catalog/routes';
 import { createCatalogRepository } from './modules/catalog/repository';
 import { healthRoutes } from './modules/health/routes';
+import { authPlugin } from './plugins/auth';
 import { correlationIdPlugin, resolveCorrelationId } from './plugins/correlation-id';
 import { errorHandlerPlugin } from './plugins/error-handler';
 
 export interface AppDeps {
-  config: Pick<Config, 'LOG_LEVEL' | 'LOG_PRETTY'>;
+  config: Pick<Config, 'LOG_LEVEL' | 'LOG_PRETTY' | 'AUTH_TOKEN_TTL_HOURS'>;
   db: Db;
+  /** Injectable clock (tests use it to exercise token expiry). */
+  now?: () => Date;
 }
 
 function loggerOptions(config: AppDeps['config']): FastifyServerOptions['logger'] {
@@ -26,7 +32,7 @@ function loggerOptions(config: AppDeps['config']): FastifyServerOptions['logger'
 }
 
 /** Builds the Fastify app without listening, so tests can drive it with `app.inject()`. */
-export async function buildApp({ config, db }: AppDeps) {
+export async function buildApp({ config, db, now }: AppDeps) {
   const app = Fastify({
     logger: loggerOptions(config),
     genReqId: resolveCorrelationId,
@@ -43,7 +49,15 @@ export async function buildApp({ config, db }: AppDeps) {
   await app.register(correlationIdPlugin);
   await app.register(errorHandlerPlugin);
 
+  const authService = createAuthService({
+    repository: createAuthRepository(db),
+    tokenTtlMs: config.AUTH_TOKEN_TTL_HOURS * 60 * 60 * 1000,
+    now,
+  });
+  await app.register(authPlugin, { authService });
+
   await app.register(healthRoutes, { db });
+  await app.register(authRoutes, { prefix: '/v1', authService });
   await app.register(catalogRoutes, { prefix: '/v1', repository: createCatalogRepository(db) });
 
   return app;

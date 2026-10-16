@@ -1,0 +1,44 @@
+import { useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Button } from '../../components/Button';
+import { EmptyView } from '../../components/StateViews';
+import { colors, spacing } from '../../components/theme';
+import { useAuth } from './AuthProvider';
+
+const PLAN_LABEL = { free: 'Free', premium: 'Premium' } as const;
+
+export function AccountScreen({ onSignedOut }: { onSignedOut: () => void }) {
+  const { user, logout } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
+
+  if (!user) return <EmptyView title="Not signed in" />;
+
+  const signOut = async () => {
+    setSigningOut(true);
+    await logout();
+    onSignedOut();
+  };
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.name}>{user.displayName}</Text>
+      <Text style={styles.detail}>@{user.username}</Text>
+      <Text style={styles.detail}>Plan: {PLAN_LABEL[user.tier]}</Text>
+      <View style={styles.action}>
+        <Button
+          title="Sign out"
+          variant="secondary"
+          onPress={() => void signOut()}
+          loading={signingOut}
+        />
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: spacing.xl, gap: spacing.sm, backgroundColor: colors.background },
+  name: { fontSize: 22, fontWeight: '700', color: colors.text },
+  detail: { fontSize: 16, color: colors.textMuted },
+  action: { marginTop: spacing.xl },
+});

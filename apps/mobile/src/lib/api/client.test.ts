@@ -147,4 +147,55 @@ describe('createApiClient', () => {
       InvalidResponseError,
     );
   });
+
+  describe('authentication', () => {
+    const okFetch = () =>
+      jest.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => json({ ok: true }));
+
+    function authClient(fetchFn: typeof fetch, token: string | null, onUnauthorized = jest.fn()) {
+      const client = createApiClient({
+        baseUrl: 'http://api.test',
+        timeoutMs: 1_000,
+        fetchFn,
+        logger: createLogger({ minLevel: 'silent' }),
+        getAuthToken: () => token,
+        onUnauthorized,
+      });
+      return { client, onUnauthorized };
+    }
+
+    it('attaches the bearer token when present', async () => {
+      const fetchFn = okFetch();
+      await authClient(fetchFn, 'tok-123').client.request({ path: '/x', schema: Schema });
+      const headers = fetchFn.mock.calls[0]![1]!.headers as Record<string, string>;
+      expect(headers.Authorization).toBe('Bearer tok-123');
+    });
+
+    it('omits the header when signed out', async () => {
+      const fetchFn = okFetch();
+      await authClient(fetchFn, null).client.request({ path: '/x', schema: Schema });
+      const headers = fetchFn.mock.calls[0]![1]!.headers as Record<string, string>;
+      expect(headers).not.toHaveProperty('Authorization');
+    });
+
+    it('reports a rejected token on 401', async () => {
+      const unauthorized = async () =>
+        json({ error: { code: 'UNAUTHORIZED', message: 'expired', correlationId: 'c' } }, 401);
+      const { client, onUnauthorized } = authClient(unauthorized, 'tok-123');
+      await expect(client.request({ path: '/x', schema: Schema })).rejects.toBeInstanceOf(
+        HttpError,
+      );
+      expect(onUnauthorized).toHaveBeenCalledWith('tok-123');
+    });
+
+    it('does not report 401s for anonymous requests', async () => {
+      const unauthorized = async () =>
+        json({ error: { code: 'UNAUTHORIZED', message: 'nope', correlationId: 'c' } }, 401);
+      const { client, onUnauthorized } = authClient(unauthorized, null);
+      await expect(client.request({ path: '/x', schema: Schema })).rejects.toBeInstanceOf(
+        HttpError,
+      );
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    });
+  });
 });
