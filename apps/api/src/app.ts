@@ -18,12 +18,15 @@ import { createProgressService } from './modules/progress/service';
 import { authPlugin } from './plugins/auth';
 import { correlationIdPlugin, resolveCorrelationId } from './plugins/correlation-id';
 import { errorHandlerPlugin } from './plugins/error-handler';
+import { createMetrics, metricsPlugin, type AppMetrics } from './plugins/metrics';
 
 export interface AppDeps {
   config: Pick<Config, 'LOG_LEVEL' | 'LOG_PRETTY' | 'AUTH_TOKEN_TTL_HOURS'>;
   db: Db;
   /** Injectable clock (tests use it to exercise token expiry and the clock-skew guard). */
   now?: () => Date;
+  /** Defaults to a fresh registry with process metrics. */
+  metrics?: AppMetrics;
 }
 
 function loggerOptions(config: AppDeps['config']): FastifyServerOptions['logger'] {
@@ -35,7 +38,7 @@ function loggerOptions(config: AppDeps['config']): FastifyServerOptions['logger'
 }
 
 /** Builds the Fastify app without listening, so tests can drive it with `app.inject()`. */
-export async function buildApp({ config, db, now }: AppDeps) {
+export async function buildApp({ config, db, now, metrics = createMetrics() }: AppDeps) {
   const app = Fastify({
     logger: loggerOptions(config),
     genReqId: resolveCorrelationId,
@@ -51,6 +54,7 @@ export async function buildApp({ config, db, now }: AppDeps) {
 
   await app.register(correlationIdPlugin);
   await app.register(errorHandlerPlugin);
+  await app.register(metricsPlugin, { metrics });
 
   const authService = createAuthService({
     repository: createAuthRepository(db),

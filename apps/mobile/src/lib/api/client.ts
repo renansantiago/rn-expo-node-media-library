@@ -2,7 +2,14 @@ import { ApiErrorBodySchema, CORRELATION_ID_HEADER } from '@media-library/contra
 import type { z } from 'zod';
 import { newId } from '../ids';
 import type { Logger } from '../logger';
-import { HttpError, InvalidResponseError, NetworkError, TimeoutError } from './errors';
+import { normalizeRoute, type RequestMetric } from '../telemetry';
+import {
+  HttpError,
+  InvalidResponseError,
+  NetworkError,
+  TimeoutError,
+  type ApiClientError,
+} from './errors';
 
 type QueryValue = string | number | boolean | undefined | null;
 
@@ -26,6 +33,8 @@ export interface ApiClientOptions {
   getAuthToken?: () => string | null | undefined;
   /** Called with the rejected token when an authenticated request gets a 401 (expired/revoked). */
   onUnauthorized?: (token: string) => void;
+  /** Called once per request with its outcome and latency (metrics hook). */
+  onRequestComplete?: (metric: RequestMetric) => void;
 }
 
 export interface ApiClient {
@@ -52,6 +61,7 @@ export function createApiClient({
   newCorrelationId = newId,
   getAuthToken,
   onUnauthorized,
+  onRequestComplete,
 }: ApiClientOptions): ApiClient {
   async function request<T>({
     method = 'GET',
@@ -78,8 +88,15 @@ export function createApiClient({
 
     const token = getAuthToken?.() ?? null;
 
-    const fail = (error: Error & { kind: string }) => {
-      log.warn('http.error', { kind: error.kind, durationMs: Date.now() - startedAt, err: error });
+    const complete = (outcome: RequestMetric['outcome'], status: number | null) => {
+      const durationMs = Date.now() - startedAt;
+      onRequestComplete?.({ method, route: normalizeRoute(path), status, outcome, durationMs });
+      return durationMs;
+    };
+
+    const fail = (error: ApiClientError, status: number | null = null) => {
+      const durationMs = complete(error.kind, status);
+      log.warn('http.error', { kind: error.kind, status, durationMs, err: error });
       return error;
     };
 
@@ -134,6 +151,7 @@ export function createApiClient({
                 envelope.data.error.details,
               )
             : new HttpError(response.status, 'UNKNOWN', `HTTP ${response.status}`, correlationId),
+          response.status,
         );
       }
 
@@ -143,10 +161,12 @@ export function createApiClient({
           new InvalidResponseError('Response did not match the expected contract', correlationId, {
             cause: parsed.error,
           }),
+          response.status,
         );
       }
 
-      log.debug('http.response', { status: response.status, durationMs: Date.now() - startedAt });
+      const durationMs = complete('success', response.status);
+      log.debug('http.response', { status: response.status, durationMs });
       return parsed.data;
     } finally {
       clearTimeout(timer);

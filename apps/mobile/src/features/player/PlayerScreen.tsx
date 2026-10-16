@@ -1,8 +1,9 @@
 import { useCallback } from 'react';
 import { ErrorView, LoadingView } from '../../components/StateViews';
+import { useIsOnline } from '../../lib/network';
 import { toUserFacingError } from '../../lib/user-facing-error';
 import { useAuth } from '../auth/AuthProvider';
-import { useItem } from '../catalog/api';
+import { useCachedItem, useItem } from '../catalog/api';
 import { useResumePosition } from '../progress/hooks';
 import { useProgressContext, type SaveReason } from '../progress/ProgressProvider';
 import { usePlaybackAccess } from './api';
@@ -15,6 +16,7 @@ interface Props {
 
 export function PlayerScreen({ itemId, onSignIn }: Props) {
   const { status } = useAuth();
+  const online = useIsOnline();
   const access = usePlaybackAccess(itemId);
   const item = useItem(itemId);
   const resume = useResumePosition(itemId);
@@ -22,7 +24,10 @@ export function PlayerScreen({ itemId, onSignIn }: Props) {
   const resolvingResume =
     storeStatus === 'opening' || (storeStatus === 'ready' && resume.isPending);
 
-  const durationSec = item.data?.durationSec ?? 0;
+  // Only the duration is needed here, so details saved by the catalog are good enough.
+  const saved = useCachedItem(itemId, !item.data);
+  const details = item.data ?? saved;
+  const durationSec = details?.durationSec ?? 0;
   const onProgress = useCallback(
     (positionSec: number, reason: SaveReason) =>
       void record({ itemId, positionSec, durationSec, reason }),
@@ -37,15 +42,27 @@ export function PlayerScreen({ itemId, onSignIn }: Props) {
       />
     );
   }
+  // A playback grant needs the server; don't start (or keep spinning) without one.
+  if (!online && !access.data) {
+    return (
+      <ErrorView
+        error={{
+          title: "You're offline",
+          message:
+            'Playback needs an internet connection. Your progress is saved on this device and syncs when you reconnect.',
+        }}
+      />
+    );
+  }
   if (access.error) {
     return (
       <ErrorView error={toUserFacingError(access.error)} onRetry={() => void access.refetch()} />
     );
   }
-  if (item.error && !item.data) {
+  if (item.error && !details) {
     return <ErrorView error={toUserFacingError(item.error)} onRetry={() => void item.refetch()} />;
   }
-  if (status === 'restoring' || access.isPending || !item.data || resolvingResume) {
+  if (status === 'restoring' || access.isPending || !details || resolvingResume) {
     return <LoadingView label="Preparing video" />;
   }
   return (

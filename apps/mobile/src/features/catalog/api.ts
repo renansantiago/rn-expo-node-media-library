@@ -12,6 +12,7 @@ import {
   useQueryClient,
   type InfiniteData,
 } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { useApiClient } from '../../lib/api';
 
 export const catalogKeys = {
@@ -51,21 +52,49 @@ export function useCatalogItems(category: string | null, limit = PAGE_SIZE_DEFAU
   });
 }
 
-/** Finds an item already loaded by any catalog list, to render details instantly. */
-function findCachedItem(
-  queryClient: ReturnType<typeof useQueryClient>,
-  id: string,
-): Item | undefined {
+/** Every item held by any cached catalog list (in memory or restored from disk), de-duplicated. */
+function cachedItems(queryClient: ReturnType<typeof useQueryClient>): Map<string, Item> {
+  const found = new Map<string, Item>();
   const lists = queryClient.getQueriesData<InfiniteData<ItemListResponse>>({
     queryKey: catalogKeys.itemLists(),
   });
   for (const [, data] of lists) {
     for (const page of data?.pages ?? []) {
-      const match = page.data.find((item) => item.id === id);
-      if (match) return match;
+      for (const item of page.data) found.set(item.id, item);
     }
   }
-  return undefined;
+  return found;
+}
+
+/** Finds an item already loaded by any catalog list, to render details instantly. */
+const findCachedItem = (queryClient: ReturnType<typeof useQueryClient>, id: string) =>
+  cachedItems(queryClient).get(id);
+
+/**
+ * Items already cached by *other* lists that belong in this one, in catalog order (newest first).
+ * Lets a category that was never opened still show something while it loads or when the server
+ * is unreachable, e.g. Animation items saved from the "All" list.
+ */
+export function useCachedItemsFor(category: string | null, enabled: boolean): Item[] {
+  const queryClient = useQueryClient();
+  return useMemo(() => {
+    if (!enabled) return [];
+    return [...cachedItems(queryClient).values()]
+      .filter((item) => !category || item.category.slug === category)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  }, [category, enabled, queryClient]);
+}
+
+/**
+ * The item as saved by a catalog list. `useItem` uses it as a placeholder while loading, but React
+ * Query drops placeholders when the request fails; screens use this to keep showing saved details.
+ */
+export function useCachedItem(id: string, enabled: boolean): Item | undefined {
+  const queryClient = useQueryClient();
+  return useMemo(
+    () => (enabled ? findCachedItem(queryClient, id) : undefined),
+    [enabled, id, queryClient],
+  );
 }
 
 export function useItem(id: string) {

@@ -4,7 +4,7 @@ A small media library product with two parts. The **mobile app** (Expo / React N
 
 The focus is correctness, reliability and operational quality, not visual design.
 
-> **Status:** Phases 1–3 are done: the foundation; catalog browsing (pagination, category filter, details), token auth and entitlement-checked playback; and playback progress with resume, offline-first saving, idempotent sync and a multi-device rule. See [Roadmap](#roadmap) for what comes next.
+> **Status:** Phases 1–4 are done: the foundation; catalog browsing, token auth and entitlement-checked playback; playback progress with resume, idempotent sync and a multi-device rule; and offline use (persisted catalog, network-aware sync) with metrics, a cache policy and documented failure modes. Phase 5 (optional extras) is next; see [Roadmap](#roadmap).
 
 ---
 
@@ -17,7 +17,7 @@ apps/
       app.ts           buildApp() factory, shared by the server and the tests
       server.ts        process entry: config, migrations, listen, graceful shutdown
       config.ts        environment parsed and validated with zod (fail fast)
-      plugins/         correlation-id, error-handler, auth (bearer tokens)
+      plugins/         correlation-id, error-handler, auth (bearer tokens), metrics (Prometheus)
       lib/             errors, password hashing, token helpers
       modules/         feature modules (health, catalog, auth, progress): routes + service + repository
       db/              schema, client, migrator, seed, maintenance CLI
@@ -26,8 +26,8 @@ apps/
   mobile/              Expo app (TypeScript, Expo Router)
     src/
       app/             routes (screens) only
-      features/        feature code (catalog, item, player, auth, progress): data hooks + screens
-      lib/             api client, logger, config, storage, on-device database, formatting, error mapping
+      features/        feature code (catalog, item, player, auth, progress, diagnostics): data hooks + screens
+      lib/             api client, logger, telemetry, network status, query persistence, on-device database, storage, config
       providers/       app-wide providers (query client, api client, auth session, progress)
       components/      shared UI primitives
       test/            MSW fake API, fixtures, render helpers, in-memory SQLite, fake video player
@@ -35,6 +35,7 @@ packages/
   contracts/           zod schemas + TS types shared by the app and the API
 docs/
   adr/                 architecture decision records
+  cache-policy.md      what the app caches, for how long, and how it behaves offline
 ```
 
 ## Prerequisites
@@ -156,8 +157,12 @@ Key decisions, with full rationale in [ADR 0001](docs/adr/0001-monorepo-and-stac
   - **Atomic and idempotent:** the API applies the rule in one SQL upsert. Each event carries a client UUID, so retries and replays are acknowledged as `duplicate` without being applied twice. Every write returns the canonical state.
   - **Guards:** events stamped more than 5 minutes ahead of the server clock are rejected (`422 CLOCK_SKEW`). Positions are clamped to the item's duration, and the item must be in the user's plan.
   - **Local first:** the app writes every save to on-device SQLite (`expo-sqlite`) and an outbox in one transaction, then syncs through the batch endpoint. The outbox keeps one pending event per item, retries with capped, jittered backoff, and only forgets an event once the server has resolved it.
-  - **When it saves:** every 10 s while playing, on pause, after a seek, at the end, when the app is backgrounded, and when the player closes. It flushes on launch, sign-in and return to foreground.
+  - **When it saves:** every 10 s while playing, on pause, after a seek, at the end, when the app is backgrounded, and when the player closes. It flushes after each save, on launch and sign-in, on return to foreground, and as soon as connectivity returns (skipping any retry backoff).
   - **Resume:** the player briefly pulls the server's latest position (3 s timeout), merges it under the same rule, and resumes from the winner. It falls back to local state when offline, and starts over below 5 s or once 95% has been watched.
+- **Offline first.** Full policy in [docs/cache-policy.md](docs/cache-policy.md).
+  - The catalog (lists, categories, item details) is persisted to AsyncStorage with TanStack Query's persister, so the app opens offline with what it last loaded. Only public catalog data is written to disk (an allow-list), never stream URLs or anything user-scoped. The cache is versioned (schema + app version), bounded (first pages of each list), expires after 7 days, and is discarded if unreadable.
+  - Thumbnails use expo-image's disk cache.
+  - NetInfo drives TanStack Query's online manager: offline, requests pause instead of failing and resume on reconnect. A banner says the app is offline; screens explain what needs a connection (loading more, playback) and keep showing what is cached, including the last position.
 - **Keyset pagination.** The catalog is ordered by `(created_at DESC, id DESC)` and paginated with an opaque cursor (base64url of the last row's position). Unlike `OFFSET`, pages stay stable while items are inserted, and each page costs O(limit) thanks to composite indexes. Malformed cursors return 400.
 - **Liveness vs readiness.** `/health` reports that the process is up. `/ready` checks the database and returns 503 when it is unavailable.
 
@@ -167,6 +172,7 @@ Key decisions, with full rationale in [ADR 0001](docs/adr/0001-monorepo-and-stac
 | ------ | ------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/health`                | –      | Liveness                                                                                                                               |
 | GET    | `/ready`                 | –      | Readiness (database check)                                                                                                             |
+| GET    | `/metrics`               | –      | Prometheus metrics (see [Observability](#observability))                                                                               |
 | GET    | `/v1/categories`         | –      | All categories, alphabetical                                                                                                           |
 | GET    | `/v1/items`              | –      | Catalog, newest first. `limit` 1–50 (default 20), `cursor` (from `nextCursor`), `category` (slug). Returns `{ data, nextCursor }`      |
 | GET    | `/v1/items/:id`          | –      | Item metadata and duration                                                                                                             |
@@ -212,6 +218,74 @@ On the device, the app keeps its own SQLite database (`expo-sqlite`), migrated w
 
 Migrations live in `apps/api/drizzle/`. They are generated from `src/db/schema.ts` with `npm run db:generate -w @media-library/api` and applied automatically on server start (or with `db:migrate`). The seed uses publicly hosted sample HLS/MP4 streams, and several items share a stream on purpose. Item IDs are stable across resets.
 
+## Observability
+
+**Logs.** Both sides write structured JSON, one object per line.
+
+- API: pino, with the request's `correlationId` on every line (and `userId` once authenticated). Authorization headers are redacted. Each request logs `incoming request` and `request completed` with status and `responseTime`; domain events (login, playback denied, progress batch outcomes) are logged with context.
+- App: `{ ts, level, event, sessionId, … }`. Every HTTP request logs `http.response` or `http.error` with method, path, status, duration, error kind and correlation ID. Sync, cache and player events are logged too (`progress.flush_deferred`, `progress.reconnected`, `cache.unreadable`, `player.error`…).
+- The correlation ID is created in the app per request, sent as `X-Correlation-Id`, reused by the API for its logs, echoed in the response header and in error bodies, and shown to the user as `Ref: abcd1234` on error screens. Grepping that reference in API logs finds the request.
+
+**Metrics.** `GET /metrics` serves the Prometheus text format:
+
+| Metric                          | Type      | Labels                                       | Use                                                       |
+| ------------------------------- | --------- | -------------------------------------------- | --------------------------------------------------------- |
+| `http_requests_total`           | counter   | `method`, `route`, `status_code`             | Request count; error rate from the status label           |
+| `http_request_duration_seconds` | histogram | `method`, `route`, `status_code`             | Latency percentiles                                       |
+| `progress_events_total`         | counter   | `outcome` (applied/stale/duplicate/rejected) | Sync health: a spike in `stale` or `rejected` is a signal |
+| `process_*`, `nodejs_*`         | various   |                                              | CPU, memory, event loop lag, GC                           |
+
+Routes are labelled by template (`/v1/items/:id`), never by raw URL, so cardinality stays bounded; unknown paths are labelled `unmatched`. Example scrape config and queries:
+
+```yaml
+scrape_configs:
+  - job_name: media-library-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:3000']
+```
+
+```promql
+sum(rate(http_requests_total[5m]))                                                        # throughput
+sum(rate(http_requests_total{status_code=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))  # error rate
+histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m]))) # p95 per route
+```
+
+In production `/metrics` would be reachable only from the internal network (or behind a token), not through the public load balancer.
+
+**App metrics.** The API client reports every request (method, route template, status, outcome, duration) to `lib/telemetry.ts`, which aggregates count, error rate and p50/p95 latency per route. That is the hook point for a real telemetry SDK (OpenTelemetry, Sentry, Datadog): forward each record instead of only aggregating. The numbers, connectivity, the sync backlog and the session ID are visible in the app under **Account → Diagnostics**, which also helps support.
+
+## Failure modes
+
+| Failure                              | What the user sees                                                                                                                                                                                                             | What the system does                                                                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Device offline                       | Offline banner; cached catalog and details; "playback needs a connection"                                                                                                                                                      | Queries pause and resume on reconnect. Progress is saved locally and queued; the queue is flushed on reconnect, skipping backoff.                                         |
+| API down / unreachable               | Cached lists keep working. A list never loaded (e.g. a new category) shows matching saved videos with a "Couldn't reach the server" notice and Retry; with nothing saved, a full-screen "Can't reach the server" with a `Ref:` | GETs retry with capped, jittered backoff (transient errors only). Progress stays in the outbox and retries with backoff (2 s → 5 min) plus on foreground and reconnect.   |
+| Slow API / timeout                   | "Taking too long" with a retry                                                                                                                                                                                                 | Every request has a 10 s hard timeout (headers and body). The resume lookup waits at most 3 s, then uses local progress. The API has its own request/connection timeouts. |
+| 5xx / unexpected error               | "Server problem" with a `Ref:`                                                                                                                                                                                                 | API logs the error with the correlation ID and returns a generic envelope (no internals).                                                                                 |
+| Response does not match the contract | "Unexpected response"                                                                                                                                                                                                          | The app validates every response with the shared schemas and refuses to render bad data; the error is logged with the correlation ID.                                     |
+| Token expired or revoked             | Signed out; asked to sign in again when needed                                                                                                                                                                                 | A 401 on a request carrying the current token clears the session and user-scoped caches. Queued progress stays on the device under that user until they sign in again.    |
+| Retried / duplicated writes          | Nothing                                                                                                                                                                                                                        | Idempotent by event id: a replay is acknowledged as `duplicate` and not applied again.                                                                                    |
+| Writes arriving out of order         | The newest position wins on every device                                                                                                                                                                                       | Multi-device rule in a single atomic upsert; late, older events are acknowledged as `stale`.                                                                              |
+| Device clock wrong                   | Ahead: its events are rejected (and dropped). Behind: its saves lose to other devices                                                                                                                                          | Events more than 5 min ahead of the server clock get `422 CLOCK_SKEW` / `rejected`. Local timestamps never go backwards per item, so a device never loses to itself.      |
+| Item removed or plan downgraded      | Item no longer playable                                                                                                                                                                                                        | Queued progress for it is rejected by the server (`unknown_item` / `forbidden`) and removed, so it never blocks the rest of the queue.                                    |
+| SQLite busy / locked (API)           | Rare slow request                                                                                                                                                                                                              | WAL mode and a 5 s busy timeout. Writes are short transactions. `/ready` reports the database as unavailable if it cannot be queried.                                     |
+| On-device storage unavailable        | App works; no resume and no offline progress                                                                                                                                                                                   | The progress store reports `failed`; playback starts from the beginning instead of blocking. Logged as `progress.db_open_failed`.                                         |
+| Persisted cache corrupted            | Nothing (cold start from the network)                                                                                                                                                                                          | Unreadable cache is logged (`cache.unreadable`) and discarded; a fresh one is written.                                                                                    |
+| App update changes cached data shape | Nothing                                                                                                                                                                                                                        | The cache buster (schema version + app version) discards the old cache on launch.                                                                                         |
+| Outbox grows (long offline period)   | Nothing                                                                                                                                                                                                                        | It is bounded by design: one pending event per (user, item), coalesced on every save. Delivery is batched (100 per request, up to 10 batches per flush).                  |
+| Video stream fails                   | "Can't play this video" with a retry                                                                                                                                                                                           | Retry requests a fresh playback grant. Logged as `player.error`.                                                                                                          |
+
+## Production improvements
+
+- **Database:** Postgres instead of SQLite (the progress upsert translates directly: `ON CONFLICT … DO UPDATE … WHERE`), connection pooling, and read replicas for the catalog.
+- **Streams:** short-lived signed CDN URLs from the playback endpoint, so a leaked URL expires on its own; a CDN in front of thumbnails and manifests.
+- **Auth:** refresh tokens with rotation, rate limiting on login (planned in Phase 5), and an OAuth/OIDC provider instead of local passwords.
+- **Observability:** OpenTelemetry traces across app and API (the correlation ID becomes the trace context), log shipping, dashboards and alerts on error rate, p95 latency and `progress_events_total{outcome="rejected"}`; a crash reporter in the app.
+- **Data lifecycle:** prune `progress_events` by `received_at` (already indexed) after a retention window, and purge expired tokens on a schedule.
+- **Catalog:** HTTP caching (`ETag` / `Cache-Control`) on public catalog endpoints so CDNs and the app can revalidate cheaply.
+- **Delivery:** containerised API with health/readiness probes wired to `/health` and `/ready`, EAS builds and OTA updates for the app.
+
 ## Testing
 
 ```bash
@@ -225,7 +299,9 @@ npm run test:coverage -w @media-library/mobile     # app with coverage threshold
   - pagination: walking every page exactly once, timestamp ties, inserts between pages, malformed cursors, the category filter;
   - auth: login, generic errors, body validation, token hashing, expiry and purge, logout revocation;
   - entitlements: 401, 403, and free and premium users playing free and premium items;
-  - progress: first write, replayed event ids (single and whole batch), older events arriving late, rewinds, timestamp tie-break in both arrival orders, clock-skew rejection and tolerance, clamping, 30 concurrent writes converging on the newest, per-user idempotency, the audit trail, mixed batch outcomes in order, batch size limits, listing and filtering, and a two-device offline scenario.
+  - progress: first write, replayed event ids (single and whole batch), older events arriving late, rewinds, timestamp tie-break in both arrival orders, clock-skew rejection and tolerance, clamping, 30 concurrent writes converging on the newest, per-user idempotency, the audit trail, mixed batch outcomes in order, batch size limits, listing and filtering, and a two-device offline scenario;
+  - metrics: request counts by route template and status, latency histogram, unknown routes not leaking paths, progress outcomes, process metrics, scrapes not counting themselves;
+  - an end-to-end scenario through the public API only: two logins, browsing with a cursor, a playback grant, an offline phone and an online tablet, a retried batch, convergence on both devices, and per-device logout.
 - **Mobile (Jest + jest-expo + React Native Testing Library + MSW).**
   - Screen tests render real providers with the real API client against a stateful MSW fake of the API (same contracts). They cover:
     - catalog: success, empty, server error with retry, timeout, offline, contract violation, infinite scroll, load-more failure with retry, category filter;
@@ -235,10 +311,12 @@ npm run test:coverage -w @media-library/mobile     # app with coverage threshold
     - progress provider: delivering events queued before the app closed, catching up on return to foreground, staying quiet while signed out, storage failures;
     - login: success, wrong credentials, connectivity;
     - account and sign-out;
-    - session: restore, refresh, offline and 401 handling.
+    - session: restore, refresh, offline and 401 handling;
+    - offline: cold start without network then loading on reconnect, reopening with the catalog saved by a previous session, never persisting user-scoped data, discarding a cache from another app version, surviving a corrupted cache, item details from cache, the player's offline message, the banner, progress saved offline and delivered on reconnect, and skipping a retry backoff on reconnect;
+    - diagnostics: request metrics, connectivity and the sync backlog on the account screen.
   - The local store, migrations and sync engine run against **real SQLite** (in-memory `better-sqlite3` behind the same interface as `expo-sqlite`), so the SQL that ships is the SQL under test. They cover coalescing, strictly increasing timestamps, merging server state under the rule, acknowledging only the delivered event, backoff and retry timers, offline/5xx/429/401/400 handling, single-flight flushing, batching over 100 events and pulling other devices' progress.
   - The progress tracker is tested with a scriptable fake player and fake timers: interval saves only while playing, pause, seek, end, background, unmount, de-duplication, and ignoring time updates until the resume seek lands.
-  - Unit tests cover the API client (timeouts, cancellation, error mapping, header propagation), the retry policy, the logger, config resolution, formatting and the resume rule.
+  - Unit tests cover the API client (timeouts, cancellation, error mapping, header propagation, metrics reporting), the retry policy, the logger, config resolution, formatting, the resume rule, the persistence allow-list and trimming, NetInfo → online state mapping, and the metrics aggregator.
   - Unhandled network requests fail the test.
 - **CI.** GitHub Actions runs lint, format, typecheck, both suites with coverage thresholds, and the API production build.
 
@@ -249,5 +327,5 @@ npm run test:coverage -w @media-library/mobile     # app with coverage threshold
 | 1     | Foundation: monorepo, contracts, API skeleton (config, logging, correlation IDs, errors, health, DB + migrations + seed), catalog first page, app skeleton (API client, catalog screen), tests, CI | ✅     |
 | 2     | Catalog and auth: cursor pagination, category filter, item detail, token auth, entitlement-checked playback endpoint, basic player                                                                 | ✅     |
 | 3     | Playback and progress: player with resume, progress tracking across background and interruptions, idempotent writes, multi-device rule, on-device progress store and sync outbox                   | ✅     |
-| 4     | Offline and observability: persisted catalog cache, network awareness (offline banner, sync on reconnect), metrics endpoint, documented cache policy and failure modes                             | ⏳     |
+| 4     | Offline and observability: persisted catalog cache, network awareness (offline banner, sync on reconnect), metrics endpoint, app telemetry, documented cache policy and failure modes              | ✅     |
 | 5     | Optional: rate limiting, contract tests, TV form-factor plan                                                                                                                                       | ⏳     |

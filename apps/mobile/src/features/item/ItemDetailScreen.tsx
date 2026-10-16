@@ -1,5 +1,6 @@
 import { canWatch, type Item, type User } from '@media-library/contracts';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../components/Button';
 import { Screen } from '../../components/Screen';
@@ -8,9 +9,9 @@ import { ProgressBar } from '../../components/ProgressBar';
 import { TierBadge } from '../../components/TierBadge';
 import { colors, spacing } from '../../components/theme';
 import { formatDuration } from '../../lib/format';
-import { toUserFacingError } from '../../lib/user-facing-error';
+import { OFFLINE_ERROR, toUserFacingError } from '../../lib/user-facing-error';
 import { useAuth, type AuthStatus } from '../auth/AuthProvider';
-import { useItem } from '../catalog/api';
+import { useCachedItem, useItem } from '../catalog/api';
 import { useItemProgress } from '../progress/hooks';
 import { resumePositionSec } from '../progress/resume';
 
@@ -21,13 +22,18 @@ interface Props {
 }
 
 export function ItemDetailScreen({ itemId, onPlay, onSignIn }: Props) {
-  const { data: item, error, isPending, refetch } = useItem(itemId);
+  const { data, error, isPending, fetchStatus, refetch } = useItem(itemId);
+  // If the request fails, keep showing what the catalog already saved for this item.
+  const saved = useCachedItem(itemId, !data);
+  const item = data ?? saved;
+  const showingSaved = !data && !!saved && !!error;
   const { status, user } = useAuth();
   const insets = useSafeAreaInsets();
   const progress = useItemProgress(itemId);
   const resumeAt = resumePositionSec(progress.data);
 
-  if (isPending) return <LoadingView label="Loading details" />;
+  if (!item && isPending && fetchStatus === 'paused') return <ErrorView error={OFFLINE_ERROR} />;
+  if (!item && isPending) return <LoadingView label="Loading details" />;
   if (!item) {
     return <ErrorView error={toUserFacingError(error)} onRetry={() => void refetch()} />;
   }
@@ -39,12 +45,22 @@ export function ItemDetailScreen({ itemId, onPlay, onSignIn }: Props) {
           <Image
             source={{ uri: item.thumbnailUrl }}
             style={styles.hero}
-            accessibilityIgnoresInvertColors
+            contentFit="cover"
+            cachePolicy="disk"
+            transition={150}
           />
         ) : (
           <View style={styles.hero} />
         )}
         <View style={styles.body}>
+          {showingSaved ? (
+            <View style={styles.savedNotice} accessible accessibilityRole="alert">
+              <Text style={styles.savedText}>
+                Couldn&apos;t refresh these details. Showing what&apos;s saved on this device.
+              </Text>
+              <Button title="Retry" variant="secondary" onPress={() => void refetch()} />
+            </View>
+          ) : null}
           <Text style={styles.title} accessibilityRole="header">
             {item.title}
           </Text>
@@ -116,6 +132,13 @@ const styles = StyleSheet.create({
   meta: { fontSize: 15, color: colors.textMuted },
   description: { fontSize: 16, lineHeight: 22, color: colors.text },
   progress: { gap: spacing.xs },
+  savedNotice: {
+    padding: spacing.md,
+    gap: spacing.sm,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+  },
+  savedText: { fontSize: 14, color: colors.text },
   progressText: { fontSize: 13, color: colors.textMuted },
   notice: {
     padding: spacing.md,

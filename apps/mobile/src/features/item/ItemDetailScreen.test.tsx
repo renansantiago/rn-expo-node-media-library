@@ -1,7 +1,8 @@
-import { fireEvent, screen } from '@testing-library/react-native';
+import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import { FREE_ITEM, itemId, PREMIUM_ITEM, USERS } from '../../test/fixtures';
-import { renderWithProviders } from '../../test/render';
-import { makeProgress, seedServerProgress } from '../../test/server';
+import { http, HttpResponse } from 'msw';
+import { queryClientWithCatalog, renderWithProviders } from '../../test/render';
+import { makeProgress, seedServerProgress, server, TEST_API_URL } from '../../test/server';
 import { ItemDetailScreen } from './ItemDetailScreen';
 
 function renderDetail(id: string, signedInAs?: 'free' | 'premium') {
@@ -67,5 +68,22 @@ describe('ItemDetailScreen', () => {
     await result;
     expect(await screen.findByRole('button', { name: 'Play' })).toBeOnTheScreen();
     expect(screen.queryByText(/left$/)).toBeNull();
+  });
+
+  it('keeps showing saved details when the server cannot be reached', async () => {
+    server.use(http.get(`${TEST_API_URL}/v1/items/:id`, () => HttpResponse.error()));
+    await renderWithProviders(
+      <ItemDetailScreen itemId={FREE_ITEM.id} onPlay={jest.fn()} onSignIn={jest.fn()} />,
+      { queryClient: queryClientWithCatalog() },
+    );
+
+    expect(await screen.findByText(/Couldn't refresh these details/)).toBeOnTheScreen();
+    expect(screen.getByRole('header', { name: FREE_ITEM.title })).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Sign in to watch' })).toBeOnTheScreen();
+
+    server.resetHandlers();
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(screen.queryByText(/Couldn't refresh these details/)).toBeNull());
+    expect(screen.getByRole('header', { name: FREE_ITEM.title })).toBeOnTheScreen();
   });
 });

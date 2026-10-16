@@ -47,6 +47,7 @@ export function createProgressSync({
   const log = logger.child({ component: 'progress-sync', userId });
   let running: Promise<FlushOutcome> | null = null;
   let rerun = false;
+  let rerunIgnoringBackoff = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
 
@@ -96,10 +97,10 @@ export function createProgressSync({
     await store.applyServerState(userId, canonical);
   }
 
-  async function run(): Promise<FlushOutcome> {
+  async function run(ignoreBackoff: boolean): Promise<FlushOutcome> {
     let delivered = 0;
     for (let batch = 0; batch < MAX_BATCHES_PER_FLUSH; batch++) {
-      const due = await store.due(userId);
+      const due = await store.due(userId, { ignoreBackoff });
       if (!due.length) break;
       try {
         await deliver(due);
@@ -134,19 +135,28 @@ export function createProgressSync({
     return delivered ? 'synced' : 'idle';
   }
 
-  function flush(): Promise<FlushOutcome> {
+  /**
+   * Delivers due events. `ignoreBackoff` also sends events waiting on a retry delay; use it when
+   * the cause of the failures is known to be gone (connectivity restored, app foregrounded).
+   */
+  function flush({
+    ignoreBackoff = false,
+  }: { ignoreBackoff?: boolean } = {}): Promise<FlushOutcome> {
     if (disposed) return Promise.resolve('idle');
     if (running) {
       rerun = true;
+      rerunIgnoringBackoff ||= ignoreBackoff;
       return running;
     }
     running = (async () => {
       try {
-        let outcome = await run();
+        let outcome = await run(ignoreBackoff);
         let synced = outcome === 'synced';
         while (rerun && outcome !== 'unauthorized' && !disposed) {
+          const ignore = rerunIgnoringBackoff;
           rerun = false;
-          outcome = await run();
+          rerunIgnoringBackoff = false;
+          outcome = await run(ignore);
           synced ||= outcome === 'synced';
         }
         // Callers that joined a run care whether their events went out, not about the last pass.
@@ -154,6 +164,7 @@ export function createProgressSync({
       } finally {
         running = null;
         rerun = false;
+        rerunIgnoringBackoff = false;
       }
     })();
     return running;

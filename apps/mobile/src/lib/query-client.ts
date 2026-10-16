@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { isRetryable } from './api/errors';
+import { PERSIST_MAX_AGE_MS } from './query-persistence';
 
 const MAX_RETRIES = 2;
 
@@ -11,6 +12,9 @@ export function createQueryClient() {
     defaultOptions: {
       queries: {
         staleTime: 5 * 60 * 1000,
+        // Unused data must outlive the persisted cache's max age, or it would be dropped from disk
+        // before it expires. User-scoped queries opt out with their own (short) gcTime.
+        gcTime: PERSIST_MAX_AGE_MS,
         retry: (failureCount, error) => isRetryable(error) && failureCount < MAX_RETRIES,
         retryDelay,
       },

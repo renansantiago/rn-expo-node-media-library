@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native';
 import { createdPlayers } from '../../test/fake-video-player';
 import { FREE_ITEM, PREMIUM_ITEM, USERS } from '../../test/fixtures';
-import { renderWithProviders } from '../../test/render';
+import { queryClientWithCatalog, renderWithProviders } from '../../test/render';
 import { http } from 'msw';
 import {
   apiError,
@@ -118,6 +118,17 @@ describe('PlayerScreen', () => {
     });
     expect(await screen.findByText('Server problem')).toBeOnTheScreen();
     expect(screen.queryByTestId('video-view')).toBeNull();
+  });
+
+  it('still plays when only the item details request fails, using the saved details', async () => {
+    server.use(
+      http.get(`${TEST_API_URL}/v1/items/:id`, () => apiError(503, 'SERVICE_UNAVAILABLE')),
+    );
+    await renderWithProviders(<PlayerScreen itemId={PREMIUM_ITEM.id} onSignIn={jest.fn()} />, {
+      signedInAs: 'premium',
+      queryClient: queryClientWithCatalog(),
+    });
+    expect(await screen.findByTestId('video-view')).toBeOnTheScreen();
   });
 
   it('saves progress while watching and syncs it to the server', async () => {

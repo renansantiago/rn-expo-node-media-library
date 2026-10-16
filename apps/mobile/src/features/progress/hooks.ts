@@ -17,6 +17,8 @@ export function useProgressMap() {
     enabled: !!store && !!userId,
     select: (rows) => new Map<string, LocalProgress>(rows.map((row) => [row.itemId, row])),
     staleTime: Infinity,
+    // Reads the on-device database: must keep working offline.
+    networkMode: 'always',
   });
 }
 
@@ -33,6 +35,7 @@ export function useItemProgress(itemId: string) {
     queryFn: () => store!.get(userId!, itemId),
     enabled: !!store && !!userId,
     staleTime: Infinity,
+    networkMode: 'always',
   });
 }
 
@@ -56,5 +59,7 @@ export function useResumePosition(itemId: string) {
     staleTime: Infinity,
     gcTime: 0,
     retry: false,
+    // Falls back to local progress offline (the pull fails fast), so it must not pause.
+    networkMode: 'always',
   });
 }

@@ -63,8 +63,11 @@ export function createLogger({
   };
 }
 
+/** Identifies one app launch; on every log line and shown in Account → Diagnostics for support. */
+export const SESSION_ID = newId();
+
 /** App-wide logger; `sessionId` ties together every log line from one app launch. */
 export const logger = createLogger({
   minLevel: process.env.NODE_ENV === 'test' ? 'silent' : __DEV__ ? 'debug' : 'info',
-  bindings: { sessionId: newId() },
+  bindings: { sessionId: SESSION_ID },
 });

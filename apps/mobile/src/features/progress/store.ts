@@ -225,14 +225,20 @@ export function createProgressStore(
       });
     },
 
-    /** Events due for delivery, oldest observation first. */
-    due(userId: string, limit = PROGRESS_BATCH_MAX): Promise<OutboxEntry[]> {
+    /**
+     * Events due for delivery, oldest observation first. `ignoreBackoff` returns every pending
+     * event (used when connectivity returns: the reason for backing off is gone).
+     */
+    due(
+      userId: string,
+      { limit = PROGRESS_BATCH_MAX, ignoreBackoff = false } = {},
+    ): Promise<OutboxEntry[]> {
       return serial(async () =>
         (
           await db.getAllAsync<OutboxRow>(
             `SELECT * FROM outbox WHERE user_id = ? AND next_attempt_at <= ?
              ORDER BY recorded_at LIMIT ?`,
-            [userId, now(), limit],
+            [userId, ignoreBackoff ? Number.MAX_SAFE_INTEGER : now(), limit],
           )
         ).map(toOutboxEntry),
       );

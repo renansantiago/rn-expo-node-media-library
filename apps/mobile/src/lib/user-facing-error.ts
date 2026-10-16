@@ -46,6 +46,12 @@ function describe(error: ApiClientError): Omit<UserFacingError, 'reference'> {
   }
 }
 
+/** Shown when a request is paused because the device is offline and nothing is cached. */
+export const OFFLINE_ERROR: UserFacingError = {
+  title: "You're offline",
+  message: 'Connect to the internet to load this. Anything you opened before is still available.',
+};
+
 /** Maps any thrown value to copy that is safe and useful to show the user. */
 export function toUserFacingError(error: unknown): UserFacingError {
   if (!(error instanceof ApiClientError)) {

@@ -120,6 +120,18 @@ describe('progress sync', () => {
     expect(fakeProgress.get(USER.id)?.get(ITEM.id)?.positionSec).toBe(entry.positionSec);
   });
 
+  it('can skip the backoff when the cause of the failures is gone (back online)', async () => {
+    const { store, sync, save } = await setup();
+    await save(ITEM, 120);
+    server.use(http.post(BATCH_URL, () => HttpResponse.error()));
+    await sync.flush();
+    server.resetHandlers();
+
+    await expect(sync.flush()).resolves.toBe('idle'); // still backing off
+    await expect(sync.flush({ ignoreBackoff: true })).resolves.toBe('synced');
+    expect(await store.pendingCount(USER.id)).toBe(0);
+  });
+
   it('keeps events (no retry timer) when the session is rejected', async () => {
     const { store, sync, timers, save } = await setup({ token: 'revoked-token' });
     await save(ITEM, 120);

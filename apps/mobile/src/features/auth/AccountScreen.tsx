@@ -4,11 +4,19 @@ import { Button } from '../../components/Button';
 import { Screen } from '../../components/Screen';
 import { EmptyView } from '../../components/StateViews';
 import { colors, spacing } from '../../components/theme';
+import type { RequestMetrics } from '../../lib/telemetry';
+import { DiagnosticsPanel } from '../diagnostics/DiagnosticsPanel';
 import { useAuth } from './AuthProvider';
 
 const PLAN_LABEL = { free: 'Free', premium: 'Premium' } as const;
 
-export function AccountScreen({ onSignedOut }: { onSignedOut: () => void }) {
+interface Props {
+  onSignedOut: () => void;
+  /** Injection point for tests. */
+  metrics?: RequestMetrics;
+}
+
+export function AccountScreen({ onSignedOut, metrics }: Props) {
   const { user, logout } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
 
@@ -33,6 +41,7 @@ export function AccountScreen({ onSignedOut }: { onSignedOut: () => void }) {
           loading={signingOut}
         />
       </View>
+      <DiagnosticsPanel metrics={metrics} />
     </Screen>
   );
 }

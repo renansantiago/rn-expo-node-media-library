@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { onlineManager, useQueryClient } from '@tanstack/react-query';
 import {
   createContext,
   useCallback,
@@ -92,20 +92,29 @@ export function ProgressProvider({ children, openDatabase = openAppDatabase }: P
     [client, store, userId],
   );
 
-  // On sign-in / launch, and whenever the app returns to the foreground: deliver what is queued
-  // (e.g. saved while offline or just before the app was killed) and pick up other devices' progress.
+  // On sign-in / launch, when connectivity returns and when the app comes back to the foreground:
+  // deliver what is queued (saved offline, or just before the app was killed), skipping any retry
+  // backoff, and pick up other devices' progress.
   useEffect(() => {
     if (!sync) return;
     const catchUp = () => {
-      void sync.flush();
+      if (!onlineManager.isOnline()) return;
+      void sync.flush({ ignoreBackoff: true });
       sync.pull().catch((err) => logger.debug('progress.pull_failed', { err }));
     };
     catchUp();
-    const subscription = AppState.addEventListener('change', (state) => {
+    const appState = AppState.addEventListener('change', (state) => {
       if (state === 'active') catchUp();
     });
+    const unsubscribeOnline = onlineManager.subscribe((online) => {
+      if (online) {
+        logger.info('progress.reconnected');
+        catchUp();
+      }
+    });
     return () => {
-      subscription.remove();
+      appState.remove();
+      unsubscribeOnline();
       sync.dispose();
     };
   }, [sync]);
@@ -120,7 +129,8 @@ export function ProgressProvider({ children, openDatabase = openAppDatabase }: P
           positionSec: entry.positionSec,
           reason,
         });
-        void sync?.flush();
+        // Offline, the event simply waits in the outbox until connectivity returns.
+        if (onlineManager.isOnline()) void sync?.flush();
       } catch (err) {
         logger.error('progress.save_failed', { err, itemId: input.itemId });
       }

@@ -63,6 +63,7 @@ export const progressRoutes: FastifyPluginAsyncZod<{ progressService: ProgressSe
     },
     async (request) => {
       const result = progressService.record(request.requireUser(), request.params.id, request.body);
+      app.metrics.progressEvents.inc({ outcome: result.ok ? result.status : 'rejected' });
       if (!result.ok) {
         request.log.info({ itemId: request.params.id, reason: result.reason }, 'progress rejected');
         throw rejectionError(result.reason);
@@ -88,6 +89,7 @@ export const progressRoutes: FastifyPluginAsyncZod<{ progressService: ProgressSe
           ? { eventId, status: result.status, progress: result.progress }
           : { eventId, status: 'rejected', reason: result.reason },
       );
+      for (const { status } of results) app.metrics.progressEvents.inc({ outcome: status });
       const counts = Object.fromEntries(
         ['applied', 'stale', 'duplicate', 'rejected'].map((s) => [
           s,

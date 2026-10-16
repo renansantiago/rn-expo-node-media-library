@@ -1,3 +1,4 @@
+import { onlineManager } from '@tanstack/react-query';
 import { createdPlayers } from './fake-video-player';
 import { resetFakeApi, server } from './server';
 
@@ -31,6 +32,14 @@ jest.mock('expo-video', () => {
   };
 });
 
+// Native storage and connectivity modules: use the libraries' official Jest mocks.
+jest.mock('@react-native-async-storage/async-storage', () =>
+  jest.requireActual('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+jest.mock('@react-native-community/netinfo', () =>
+  jest.requireActual('@react-native-community/netinfo/jest/netinfo-mock'),
+);
+
 // Icon fonts are bundled assets Jest can't load; render the glyph name instead.
 jest.mock('@expo/vector-icons/Ionicons', () => {
   const { createElement } = jest.requireActual('react');
@@ -47,5 +56,6 @@ afterEach(() => {
   server.resetHandlers();
   resetFakeApi();
   createdPlayers.length = 0;
+  onlineManager.setOnline(true);
 });
 afterAll(() => server.close());

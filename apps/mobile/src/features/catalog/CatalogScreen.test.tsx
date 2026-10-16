@@ -154,4 +154,39 @@ describe('CatalogScreen', () => {
     // A finished video shows no resume bar (it will start over).
     expect(screen.getAllByRole('progressbar', { name: /^Watched/ })).toHaveLength(1);
   });
+
+  describe('a category that was never loaded', () => {
+    const animation = CATALOG.filter((i) => i.category.slug === 'animation');
+    const listData = () => screen.getByTestId('catalog-list').props.data as { id: string }[];
+
+    it('shows matching saved videos when the server is unreachable, and recovers on retry', async () => {
+      await renderCatalog();
+      expect(await screen.findByText(CATALOG[0]!.title)).toBeOnTheScreen();
+
+      // The server goes away; only "All" (first page) has been loaded so far.
+      server.use(
+        http.get(itemsUrl, ({ request }) =>
+          new URL(request.url).searchParams.get('category') ? HttpResponse.error() : undefined,
+        ),
+      );
+      await fireEvent.press(screen.getByRole('tab', { name: 'Animation' }));
+
+      expect(
+        await screen.findByText(/Couldn't reach the server\. Showing videos saved on this device/),
+      ).toBeOnTheScreen();
+      const cachedAnimation = animation.filter((i) => CATALOG.slice(0, 20).includes(i));
+      expect(listData().map((i) => i.id)).toEqual(cachedAnimation.map((i) => i.id));
+
+      server.resetHandlers();
+      await fireEvent.press(screen.getByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(screen.queryByText(/Couldn't reach the server/)).toBeNull());
+      expect(listData().map((i) => i.id)).toEqual(animation.map((i) => i.id));
+    });
+
+    it('falls back to the full-screen error when nothing saved matches', async () => {
+      server.use(http.get(itemsUrl, () => HttpResponse.error()));
+      await renderCatalog();
+      expect(await screen.findByText("Can't reach the server")).toBeOnTheScreen();
+    });
+  });
 });

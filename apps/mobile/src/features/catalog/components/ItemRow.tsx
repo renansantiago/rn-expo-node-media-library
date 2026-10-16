@@ -1,6 +1,7 @@
 import type { Item } from '@media-library/contracts';
 import { memo } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ProgressBar } from '../../../components/ProgressBar';
 import { TierBadge } from '../../../components/TierBadge';
 import { colors, spacing } from '../../../components/theme';
@@ -26,10 +27,13 @@ function ItemRowComponent({ item, onPress, progress }: Props) {
     >
       <View style={styles.thumbnail}>
         {item.thumbnailUrl ? (
+          // expo-image keeps a disk cache, so thumbnails seen before still render offline.
           <Image
             source={{ uri: item.thumbnailUrl }}
             style={StyleSheet.absoluteFill}
-            accessibilityIgnoresInvertColors
+            contentFit="cover"
+            cachePolicy="disk"
+            transition={150}
           />
         ) : (
           <View style={[StyleSheet.absoluteFill, styles.thumbnailPlaceholder]} />
