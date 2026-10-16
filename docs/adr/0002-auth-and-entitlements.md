@@ -21,4 +21,4 @@
 ## Consequences
 
 - In production, stream URLs should be short-lived signed CDN URLs, so a leaked URL expires on its own. Today the playback endpoint returns a static URL.
-- Login has no brute-force protection yet. Rate limiting on the auth and write endpoints is planned (optional phase).
+- Brute-force protection is a rate limit on login per (client IP, username), with `Retry-After`. It slows guessing against one account without locking out everyone behind a shared IP. Counters are in memory; several API instances would share a Redis store, and an edge limit (gateway / WAF) would handle volumetric abuse.

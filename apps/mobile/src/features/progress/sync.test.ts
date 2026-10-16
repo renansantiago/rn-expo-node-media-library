@@ -132,6 +132,24 @@ describe('progress sync', () => {
     expect(await store.pendingCount(USER.id)).toBe(0);
   });
 
+  it('waits exactly as long as the server asks when rate limited (Retry-After)', async () => {
+    const { store, sync, timers, save } = await setup();
+    await save(ITEM, 120);
+    server.use(
+      http.post(BATCH_URL, () => {
+        const response = apiError(429, 'RATE_LIMITED');
+        response.headers.set('Retry-After', '30');
+        return response;
+      }),
+    );
+
+    await expect(sync.flush()).resolves.toBe('retry_scheduled');
+    const [timer] = [...timers.values()];
+    expect(timer?.ms).toBeGreaterThan(29_000);
+    expect(timer?.ms).toBeLessThanOrEqual(30_000);
+    expect(await store.pendingCount(USER.id)).toBe(1);
+  });
+
   it('keeps events (no retry timer) when the session is rejected', async () => {
     const { store, sync, timers, save } = await setup({ token: 'revoked-token' });
     await save(ITEM, 120);

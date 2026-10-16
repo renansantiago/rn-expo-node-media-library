@@ -28,4 +28,11 @@ describe('toUserFacingError', () => {
     expect(result.message).not.toContain('SQLITE');
     expect(result.reference).toBeUndefined();
   });
+
+  it('tells the user how long to wait when rate limited', () => {
+    const limited = new HttpError(429, 'RATE_LIMITED', 'x', 'corr-1234', undefined, 12_000);
+    expect(toUserFacingError(limited).message).toBe('Too many requests. Try again in 12 seconds.');
+    const unknownWait = new HttpError(429, 'RATE_LIMITED', 'x', 'corr-1234');
+    expect(toUserFacingError(unknownWait).message).toBe('Too many requests. Please wait a moment.');
+  });
 });

@@ -64,11 +64,18 @@ export const metricsPlugin = fp(
       metrics.httpDuration.observe(labels, reply.elapsedTime / 1000);
     });
 
-    app.get(METRICS_PATH, { logLevel: 'warn' }, async (_request, reply) => {
-      reply.header('Content-Type', metrics.registry.contentType);
-      reply.header('Cache-Control', 'no-store');
-      return metrics.registry.metrics();
-    });
+    app.get(
+      METRICS_PATH,
+      {
+        logLevel: 'warn',
+        schema: { tags: ['health'], summary: 'Prometheus metrics (text exposition format)' },
+      },
+      async (_request, reply) => {
+        reply.header('Content-Type', metrics.registry.contentType);
+        reply.header('Cache-Control', 'no-store');
+        return metrics.registry.metrics();
+      },
+    );
   },
   { name: 'metrics' },
 );

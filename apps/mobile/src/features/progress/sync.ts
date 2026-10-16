@@ -117,12 +117,14 @@ export function createProgressSync({
         } else {
           log.info('progress.flush_deferred', { err: error, events: due.length });
         }
+        // Rate limited (or told to come back later): wait exactly as long as the server asks.
+        const serverDelay = error instanceof HttpError ? error.retryAfterMs : undefined;
         await store.reschedule(
           userId,
           due.map((entry) => entry.eventId),
           {
             error: error instanceof Error ? error.message : String(error),
-            delayMs: (attempts) => outboxRetryDelay(attempts, random),
+            delayMs: (attempts) => serverDelay ?? outboxRetryDelay(attempts, random),
           },
         );
         await armRetryTimer();

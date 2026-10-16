@@ -1,4 +1,11 @@
-import { HttpError, InvalidResponseError, isRetryable, NetworkError, TimeoutError } from './errors';
+import {
+  HttpError,
+  InvalidResponseError,
+  isRetryable,
+  NetworkError,
+  parseRetryAfter,
+  TimeoutError,
+} from './errors';
 
 describe('isRetryable', () => {
   it.each([
@@ -15,5 +22,19 @@ describe('isRetryable', () => {
     [new Error('plain'), false],
   ])('%s → %s', (error, expected) => {
     expect(isRetryable(error)).toBe(expected);
+  });
+});
+
+describe('parseRetryAfter', () => {
+  const now = Date.parse('2026-06-01T12:00:00Z');
+  it.each([
+    ['30', 30_000],
+    ['0', 0],
+    ['Mon, 01 Jun 2026 12:00:45 GMT', 45_000],
+    ['Mon, 01 Jun 2026 11:00:00 GMT', 0], // in the past → no wait
+    ['soon', undefined],
+    [null, undefined],
+  ])('%s → %s ms', (header, expected) => {
+    expect(parseRetryAfter(header, now)).toBe(expected);
   });
 });

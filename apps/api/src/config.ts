@@ -20,6 +20,12 @@ const ConfigSchema = z.object({
     .default(24 * 7),
   /** Password given to the seeded demo users. When unset, `db:seed` generates and prints one. */
   DEMO_USER_PASSWORD: z.string().min(8).optional(),
+  /** Rate-limit window shared by the limits below. */
+  RATE_LIMIT_WINDOW_SEC: z.coerce.number().int().min(1).max(3600).default(60),
+  /** Login attempts per window, per (client IP, username). */
+  RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().min(1).default(10),
+  /** Progress writes per window, per user (client IP when unauthenticated). */
+  RATE_LIMIT_WRITE_MAX: z.coerce.number().int().min(1).default(120),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

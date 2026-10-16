@@ -9,6 +9,7 @@ import {
   NetworkError,
   TimeoutError,
   type ApiClientError,
+  parseRetryAfter,
 } from './errors';
 
 type QueryValue = string | number | boolean | undefined | null;
@@ -141,6 +142,7 @@ export function createApiClient({
       if (!response.ok) {
         if (response.status === 401 && token) onUnauthorized?.(token);
         const envelope = ApiErrorBodySchema.safeParse(json);
+        const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
         throw fail(
           envelope.success
             ? new HttpError(
@@ -149,8 +151,16 @@ export function createApiClient({
                 envelope.data.error.message,
                 envelope.data.error.correlationId,
                 envelope.data.error.details,
+                retryAfterMs,
               )
-            : new HttpError(response.status, 'UNKNOWN', `HTTP ${response.status}`, correlationId),
+            : new HttpError(
+                response.status,
+                'UNKNOWN',
+                `HTTP ${response.status}`,
+                correlationId,
+                undefined,
+                retryAfterMs,
+              ),
           response.status,
         );
       }

@@ -27,13 +27,16 @@ function toProgress(row: PlaybackProgressRow, durationSec: number): Progress {
 
 /**
  * The incoming row wins only if it is a newer observation: later client `recorded_at`, or the same
- * instant from a greater `device_id`. Evaluated by SQLite inside the upsert, so it is atomic even
+ * instant from a greater `device_id`, or (same device and instant) a greater event id. Evaluated by SQLite inside the upsert, so it is atomic even
  * with several API processes writing the same row (SQLite serialises writers).
  * Mirrors `isNewerObservation` from the shared contracts.
  */
 const incomingIsNewer = sql`excluded.client_recorded_at > ${playbackProgress.clientRecordedAt}
   OR (excluded.client_recorded_at = ${playbackProgress.clientRecordedAt}
-      AND excluded.device_id > ${playbackProgress.deviceId})`;
+      AND excluded.device_id > ${playbackProgress.deviceId})
+  OR (excluded.client_recorded_at = ${playbackProgress.clientRecordedAt}
+      AND excluded.device_id = ${playbackProgress.deviceId}
+      AND excluded.last_event_id > ${playbackProgress.lastEventId})`;
 
 export function createProgressRepository(db: Db) {
   const selectProgress = () =>

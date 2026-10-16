@@ -1,16 +1,39 @@
 import {
+  ApiErrorBodySchema,
+  CategoryListResponseSchema,
   isCompleted,
   isNewerObservation,
+  ItemListResponseSchema,
+  ItemSchema,
+  LoginResponseSchema,
+  MeResponseSchema,
+  PlaybackResponseSchema,
   ProgressBatchRequestSchema,
+  ProgressBatchResponseSchema,
+  ProgressListResponseSchema,
   type ApiErrorBody,
   type Progress,
   type ProgressBatchResult,
 } from '@media-library/contracts';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
+import type { z } from 'zod';
 import { CATALOG, CATEGORIES, TEST_PASSWORD, USERS } from './fixtures';
 
 export const TEST_API_URL = 'http://api.test';
+
+/** Responses from the fake API that broke the shared contract; any entry fails the test. */
+export const contractViolations: string[] = [];
+
+/**
+ * Every fake response goes through the same zod schema the real API serialises with, so the
+ * fake cannot drift from the API: a mismatch is recorded and fails the test (see setup.ts).
+ */
+export function contract<T>(schema: z.ZodType<T>, body: T, init?: ResponseInit) {
+  const result = schema.safeParse(body);
+  if (!result.success) contractViolations.push(result.error.message);
+  return HttpResponse.json(body as object, init);
+}
 const url = (path: string) => `${TEST_API_URL}${path}`;
 
 export const apiError = (
@@ -18,7 +41,8 @@ export const apiError = (
   code: ApiErrorBody['error']['code'],
   message: string = code,
 ) =>
-  HttpResponse.json<ApiErrorBody>(
+  contract<ApiErrorBody>(
+    ApiErrorBodySchema,
     { error: { code, message, correlationId: 'server-corr-0001' } },
     { status },
   );
@@ -31,6 +55,7 @@ export const fakeProgress = new Map<string, Map<string, Progress>>();
 export const receivedBatches: unknown[][] = [];
 
 export function resetFakeApi() {
+  contractViolations.length = 0;
   fakeProgress.clear();
   receivedBatches.length = 0;
   validTokens.clear();
@@ -47,7 +72,7 @@ function currentUser(request: Request) {
 
 /** A small, stateful fake of the real API (same contracts); tests override with `server.use`. */
 export const handlers = [
-  http.get(url('/v1/categories'), () => HttpResponse.json({ data: CATEGORIES })),
+  http.get(url('/v1/categories'), () => contract(CategoryListResponseSchema, { data: CATEGORIES })),
 
   http.get(url('/v1/items'), ({ request }) => {
     const params = new URL(request.url).searchParams;
@@ -57,12 +82,15 @@ export const handlers = [
     const filtered = category ? CATALOG.filter((i) => i.category.slug === category) : CATALOG;
     const data = filtered.slice(offset, offset + limit);
     const next = offset + limit;
-    return HttpResponse.json({ data, nextCursor: next < filtered.length ? String(next) : null });
+    return contract(ItemListResponseSchema, {
+      data,
+      nextCursor: next < filtered.length ? String(next) : null,
+    });
   }),
 
   http.get(url('/v1/items/:id'), ({ params }) => {
     const item = CATALOG.find((i) => i.id === params.id);
-    return item ? HttpResponse.json(item) : apiError(404, 'NOT_FOUND');
+    return item ? contract(ItemSchema, item) : apiError(404, 'NOT_FOUND');
   }),
 
   http.get(url('/v1/items/:id/playback'), ({ params, request }) => {
@@ -72,7 +100,10 @@ export const handlers = [
     if (!item) return apiError(404, 'NOT_FOUND');
     if (item.requiredTier === 'premium' && user.tier !== 'premium')
       return apiError(403, 'FORBIDDEN');
-    return HttpResponse.json({ itemId: item.id, streamUrl: `https://cdn.test/${item.id}.m3u8` });
+    return contract(PlaybackResponseSchema, {
+      itemId: item.id,
+      streamUrl: `https://cdn.test/${item.id}.m3u8`,
+    });
   }),
 
   http.post(url('/v1/auth/login'), async ({ request }) => {
@@ -85,7 +116,7 @@ export const handlers = [
     }
     const token = `token-${tier}`;
     validTokens.set(token, tier);
-    return HttpResponse.json({
+    return contract(LoginResponseSchema, {
       token,
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       user: USERS[tier],
@@ -101,7 +132,7 @@ export const handlers = [
 
   http.get(url('/v1/me'), ({ request }) => {
     const user = currentUser(request);
-    return user ? HttpResponse.json({ user }) : apiError(401, 'UNAUTHORIZED');
+    return user ? contract(MeResponseSchema, { user }) : apiError(401, 'UNAUTHORIZED');
   }),
 
   http.get(url('/v1/me/progress'), ({ request }) => {
@@ -110,7 +141,7 @@ export const handlers = [
     const itemIds = new URL(request.url).searchParams.get('itemIds')?.split(',');
     const all = [...(fakeProgress.get(user.id)?.values() ?? [])];
     const data = itemIds ? all.filter((p) => itemIds.includes(p.itemId)) : all;
-    return HttpResponse.json({ data });
+    return contract(ProgressListResponseSchema, { data });
   }),
 
   http.post(url('/v1/me/progress/batch'), async ({ request }) => {
@@ -135,7 +166,7 @@ export const handlers = [
       states.set(event.itemId, progress);
       return { eventId: event.eventId, status: 'applied', progress };
     });
-    return HttpResponse.json({ results });
+    return contract(ProgressBatchResponseSchema, { results });
   }),
 ];
 

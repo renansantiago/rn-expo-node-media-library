@@ -7,7 +7,7 @@
 
 - **Multi-device rule: last observation wins.** Each progress event carries the device clock time it was observed at (`recordedAt`) and a stable per-install `deviceId`.
   - The canonical position is the most recent observation, not the most recent arrival. A phone that watched offline at 9:00 and syncs at 10:00 does not overwrite a tablet that watched at 9:30.
-  - Exact timestamp ties go to the greater `deviceId`, so every replica (API and each device's local store) converges on the same answer whatever the delivery order.
+  - Exact timestamp ties go to the greater `deviceId`, then the greater `eventId`. That makes the rule a strict total order, so every replica (API and each device's local store) converges on the same answer whatever the delivery order, even for a client that reuses timestamps. Property-based tests deliver random event sets in random orders and check exactly that; they are what found the same-device, same-timestamp case the `eventId` tie-break now settles. (The app itself never produces it: its timestamps strictly increase per item.)
   - The rule lives in `packages/contracts` (`isNewerObservation`). The API runs it as a single SQL upsert (`ON CONFLICT … DO UPDATE … WHERE`), which is atomic even with several writers. The app's local store applies the same SQL when it merges server state.
   - Moving backwards is allowed when it is newer: if the user rewinds, the rewind wins.
   - Alternatives rejected: _furthest position wins_ (can never rewind, and a stray seek to the end sticks forever); _server arrival time wins_ (late offline syncs clobber newer progress).

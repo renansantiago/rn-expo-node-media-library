@@ -19,9 +19,19 @@ import { authPlugin } from './plugins/auth';
 import { correlationIdPlugin, resolveCorrelationId } from './plugins/correlation-id';
 import { errorHandlerPlugin } from './plugins/error-handler';
 import { createMetrics, metricsPlugin, type AppMetrics } from './plugins/metrics';
+import { openApiPlugin } from './plugins/openapi';
+import { rateLimitPlugin } from './plugins/rate-limit';
 
 export interface AppDeps {
-  config: Pick<Config, 'LOG_LEVEL' | 'LOG_PRETTY' | 'AUTH_TOKEN_TTL_HOURS'>;
+  config: Pick<
+    Config,
+    | 'LOG_LEVEL'
+    | 'LOG_PRETTY'
+    | 'AUTH_TOKEN_TTL_HOURS'
+    | 'RATE_LIMIT_WINDOW_SEC'
+    | 'RATE_LIMIT_LOGIN_MAX'
+    | 'RATE_LIMIT_WRITE_MAX'
+  >;
   db: Db;
   /** Injectable clock (tests use it to exercise token expiry and the clock-skew guard). */
   now?: () => Date;
@@ -54,7 +64,14 @@ export async function buildApp({ config, db, now, metrics = createMetrics() }: A
 
   await app.register(correlationIdPlugin);
   await app.register(errorHandlerPlugin);
+  // First, so every route registered after it (including /metrics) is documented.
+  await app.register(openApiPlugin);
   await app.register(metricsPlugin, { metrics });
+  await app.register(rateLimitPlugin, {
+    windowSec: config.RATE_LIMIT_WINDOW_SEC,
+    loginMax: config.RATE_LIMIT_LOGIN_MAX,
+    writeMax: config.RATE_LIMIT_WRITE_MAX,
+  });
 
   const authService = createAuthService({
     repository: createAuthRepository(db),

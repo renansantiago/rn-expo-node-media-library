@@ -11,6 +11,9 @@ describe('loadConfig', () => {
       LOG_PRETTY: false,
       DATABASE_PATH: './data/media-library.db',
       AUTH_TOKEN_TTL_HOURS: 168,
+      RATE_LIMIT_WINDOW_SEC: 60,
+      RATE_LIMIT_LOGIN_MAX: 10,
+      RATE_LIMIT_WRITE_MAX: 120,
     });
   });
 

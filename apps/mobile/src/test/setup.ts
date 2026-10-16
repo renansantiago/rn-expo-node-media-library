@@ -1,6 +1,6 @@
 import { onlineManager } from '@tanstack/react-query';
 import { createdPlayers } from './fake-video-player';
-import { resetFakeApi, server } from './server';
+import { contractViolations, resetFakeApi, server } from './server';
 
 // SafeAreaProvider renders nothing until native insets arrive; use the library's static mock.
 jest.mock(
@@ -53,6 +53,8 @@ jest.mock('@expo/vector-icons/Ionicons', () => {
 // Any request without a handler fails the test instead of silently hitting the network.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
+  // The fake API must honour the shared contract (see `contract` in server.ts).
+  expect(contractViolations).toEqual([]);
   server.resetHandlers();
   resetFakeApi();
   createdPlayers.length = 0;

@@ -52,6 +52,22 @@ describe('LoginScreen', () => {
     expect(screen.getByLabelText('Password')).toHaveProp('secureTextEntry', true);
   });
 
+  it('explains when sign-in is rate limited and when to try again', async () => {
+    server.use(
+      http.post(`${TEST_API_URL}/v1/auth/login`, () =>
+        HttpResponse.json(
+          { error: { code: 'RATE_LIMITED', message: 'Too many', correlationId: 'corr-0001' } },
+          { status: 429, headers: { 'Retry-After': '42' } },
+        ),
+      ),
+    );
+    await renderWithProviders(<LoginScreen onSuccess={jest.fn()} />);
+    await fillAndSubmit('free-user', 'wrong');
+    expect(
+      await screen.findByText('Too many sign-in attempts. Try again in 42 seconds.'),
+    ).toBeOnTheScreen();
+  });
+
   it('explains connectivity problems with a support reference', async () => {
     server.use(http.post(`${TEST_API_URL}/v1/auth/login`, () => HttpResponse.error()));
     await renderWithProviders(<LoginScreen onSuccess={jest.fn()} />);

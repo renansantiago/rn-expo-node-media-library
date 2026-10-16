@@ -34,6 +34,8 @@ export class HttpError extends ApiClientError {
   readonly status: number;
   readonly code: ErrorCode | 'UNKNOWN';
   readonly details?: unknown;
+  /** From the `Retry-After` header (429/503): how long the server asks clients to wait. */
+  readonly retryAfterMs?: number;
 
   constructor(
     status: number,
@@ -41,12 +43,23 @@ export class HttpError extends ApiClientError {
     message: string,
     correlationId: string,
     details?: unknown,
+    retryAfterMs?: number,
   ) {
     super(message, correlationId);
     this.status = status;
     this.code = code;
     this.details = details;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/** Parses `Retry-After` (delta-seconds or an HTTP date) into milliseconds. */
+export function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - now);
 }
 
 /** Transient failures worth retrying; 4xx (other than 408/429) are not. */

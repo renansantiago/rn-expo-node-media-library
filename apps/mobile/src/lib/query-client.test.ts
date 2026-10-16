@@ -24,4 +24,12 @@ describe('query client retry policy', () => {
       expect(delay).toBeLessThanOrEqual(Math.min(10_000, 500 * 2 ** attempt));
     }
   });
+
+  it('honours a short Retry-After and gives up on a long one', () => {
+    const shortWait = new HttpError(429, 'RATE_LIMITED', 'x', 'c', undefined, 3_000);
+    const longWait = new HttpError(429, 'RATE_LIMITED', 'x', 'c', undefined, 60_000);
+    expect(retry(0, shortWait)).toBe(true);
+    expect(retryDelay(0, shortWait)).toBe(3_000);
+    expect(retry(0, longWait)).toBe(false);
+  });
 });

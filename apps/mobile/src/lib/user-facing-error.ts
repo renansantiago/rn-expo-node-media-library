@@ -14,8 +14,15 @@ function describeHttpError(error: HttpError): Omit<UserFacingError, 'reference'>
     return { title: 'Not available', message: "Your plan doesn't include this content." };
   if (error.status === 404)
     return { title: 'Not found', message: 'This content is no longer available.' };
-  if (error.status === 429)
-    return { title: 'Slow down', message: 'Too many requests. Please wait a moment.' };
+  if (error.status === 429) {
+    const wait = error.retryAfterMs ? Math.ceil(error.retryAfterMs / 1000) : undefined;
+    return {
+      title: 'Slow down',
+      message: wait
+        ? `Too many requests. Try again in ${wait} second${wait === 1 ? '' : 's'}.`
+        : 'Too many requests. Please wait a moment.',
+    };
+  }
   if (error.status >= 500) {
     return {
       title: 'Server problem',

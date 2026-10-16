@@ -21,6 +21,8 @@ interface TestAppOptions {
   extend?: (app: App) => void;
   now?: () => Date;
   tokenTtlHours?: number;
+  /** High by default so only the rate-limit tests ever hit a limit. */
+  rateLimits?: { windowSec?: number; loginMax?: number; writeMax?: number };
 }
 
 /** Fresh in-memory database (migrated, optionally seeded) behind a fully wired app. */
@@ -29,13 +31,21 @@ export async function createTestApp({
   extend,
   now,
   tokenTtlHours = 1,
+  rateLimits = {},
 }: TestAppOptions = {}): Promise<TestContext> {
   const handle = openDatabase(':memory:');
   runMigrations(handle.db);
   if (withSeed) await seed(handle.db, { demoPassword: TEST_PASSWORD });
 
   const app = await buildApp({
-    config: { LOG_LEVEL: 'silent', LOG_PRETTY: false, AUTH_TOKEN_TTL_HOURS: tokenTtlHours },
+    config: {
+      LOG_LEVEL: 'silent',
+      LOG_PRETTY: false,
+      AUTH_TOKEN_TTL_HOURS: tokenTtlHours,
+      RATE_LIMIT_WINDOW_SEC: rateLimits.windowSec ?? 60,
+      RATE_LIMIT_LOGIN_MAX: rateLimits.loginMax ?? 10_000,
+      RATE_LIMIT_WRITE_MAX: rateLimits.writeMax ?? 10_000,
+    },
     db: handle.db,
     now,
   });

@@ -42,6 +42,9 @@ export const progressRoutes: FastifyPluginAsyncZod<{ progressService: ProgressSe
     '/me/progress',
     {
       schema: {
+        tags: ['progress'],
+        summary: 'Progress for given items, or the most recently watched',
+        security: [{ bearerAuth: [] }],
         querystring: ListProgressQuerySchema,
         response: { 200: ProgressListResponseSchema },
       },
@@ -55,7 +58,11 @@ export const progressRoutes: FastifyPluginAsyncZod<{ progressService: ProgressSe
   app.put(
     '/me/progress/:id',
     {
+      config: { rateLimit: app.rateLimits.write },
       schema: {
+        tags: ['progress'],
+        summary: 'Record one progress event (idempotent by eventId)',
+        security: [{ bearerAuth: [] }],
         params: ItemParamsSchema,
         body: ProgressEventFieldsSchema,
         response: { 200: ProgressWriteResponseSchema },
@@ -77,7 +84,11 @@ export const progressRoutes: FastifyPluginAsyncZod<{ progressService: ProgressSe
   app.post(
     '/me/progress/batch',
     {
+      config: { rateLimit: app.rateLimits.write },
       schema: {
+        tags: ['progress'],
+        summary: 'Record up to 100 progress events (offline sync)',
+        security: [{ bearerAuth: [] }],
         body: ProgressBatchRequestSchema,
         response: { 200: ProgressBatchResponseSchema },
       },

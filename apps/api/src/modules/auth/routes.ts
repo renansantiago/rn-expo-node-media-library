@@ -12,7 +12,15 @@ export const authRoutes: FastifyPluginAsyncZod<{ authService: AuthService }> = a
 ) => {
   app.post(
     '/auth/login',
-    { schema: { body: LoginRequestSchema, response: { 200: LoginResponseSchema } } },
+    {
+      config: { rateLimit: app.rateLimits.login },
+      schema: {
+        tags: ['auth'],
+        summary: 'Log in and receive a bearer token',
+        body: LoginRequestSchema,
+        response: { 200: LoginResponseSchema },
+      },
+    },
     async (request, reply) => {
       const { username, password } = request.body;
       const result = await authService.login(username, password);
@@ -22,14 +30,33 @@ export const authRoutes: FastifyPluginAsyncZod<{ authService: AuthService }> = a
     },
   );
 
-  app.post('/auth/logout', { preHandler: app.authenticate }, async (request, reply) => {
-    authService.logout(request.authToken!);
-    return reply.status(204).send();
-  });
+  app.post(
+    '/auth/logout',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        tags: ['auth'],
+        summary: 'Revoke the current token (204)',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      authService.logout(request.authToken!);
+      return reply.status(204).send();
+    },
+  );
 
   app.get(
     '/me',
-    { preHandler: app.authenticate, schema: { response: { 200: MeResponseSchema } } },
+    {
+      preHandler: app.authenticate,
+      schema: {
+        tags: ['auth'],
+        summary: 'The signed-in user',
+        security: [{ bearerAuth: [] }],
+        response: { 200: MeResponseSchema },
+      },
+    },
     async (request) => ({ user: request.requireUser() }),
   );
 };

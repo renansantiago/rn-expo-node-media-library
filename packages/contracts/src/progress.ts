@@ -107,18 +107,24 @@ export function isCompleted(positionSec: number, durationSec: number): boolean {
 
 /**
  * The multi-device rule, shared by the API and the app's local store: the most recent observation
- * by device clock wins; exact ties go to the lexicographically greater device id so every replica
- * converges on the same answer regardless of arrival order.
+ * by device clock wins; exact ties go to the lexicographically greater device id, then (when known)
+ * the greater event id. That makes it a total order, so every replica converges on the same answer
+ * regardless of arrival order, even for a client that reuses timestamps.
  */
-export function isNewerObservation(
-  candidate: { recordedAt: string | number; deviceId: string },
-  current: { recordedAt: string | number; deviceId: string },
-): boolean {
+export interface Observation {
+  recordedAt: string | number;
+  deviceId: string;
+  eventId?: string;
+}
+
+export function isNewerObservation(candidate: Observation, current: Observation): boolean {
   const a =
     typeof candidate.recordedAt === 'number'
       ? candidate.recordedAt
       : Date.parse(candidate.recordedAt);
   const b =
     typeof current.recordedAt === 'number' ? current.recordedAt : Date.parse(current.recordedAt);
-  return a > b || (a === b && candidate.deviceId > current.deviceId);
+  if (a !== b) return a > b;
+  if (candidate.deviceId !== current.deviceId) return candidate.deviceId > current.deviceId;
+  return (candidate.eventId ?? '') > (current.eventId ?? '');
 }

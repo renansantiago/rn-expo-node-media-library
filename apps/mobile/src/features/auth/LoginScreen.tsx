@@ -42,6 +42,9 @@ export function LoginScreen({ onSuccess }: Props) {
     } catch (err) {
       if (err instanceof HttpError && err.status === 401) {
         setError('Invalid username or password.');
+      } else if (err instanceof HttpError && err.status === 429) {
+        const wait = Math.ceil((err.retryAfterMs ?? 60_000) / 1000);
+        setError(`Too many sign-in attempts. Try again in ${wait} seconds.`);
       } else {
         const friendly = toUserFacingError(err);
         setError(`${friendly.message}${friendly.reference ? ` (Ref: ${friendly.reference})` : ''}`);

@@ -18,13 +18,26 @@ export const catalogRoutes: FastifyPluginAsyncZod<{ repository: CatalogRepositor
 ) => {
   app.get(
     '/categories',
-    { schema: { response: { 200: CategoryListResponseSchema } } },
+    {
+      schema: {
+        tags: ['catalog'],
+        summary: 'All categories, alphabetical',
+        response: { 200: CategoryListResponseSchema },
+      },
+    },
     async () => ({ data: repository.listCategories() }),
   );
 
   app.get(
     '/items',
-    { schema: { querystring: ListItemsQuerySchema, response: { 200: ItemListResponseSchema } } },
+    {
+      schema: {
+        tags: ['catalog'],
+        summary: 'Catalog page, newest first (keyset cursor, optional category)',
+        querystring: ListItemsQuerySchema,
+        response: { 200: ItemListResponseSchema },
+      },
+    },
     async (request) => {
       const { limit, cursor, category } = request.query;
       const page = repository.listItems({
@@ -45,7 +58,14 @@ export const catalogRoutes: FastifyPluginAsyncZod<{ repository: CatalogRepositor
 
   app.get(
     '/items/:id',
-    { schema: { params: ItemParamsSchema, response: { 200: ItemSchema } } },
+    {
+      schema: {
+        tags: ['catalog'],
+        summary: 'Item metadata',
+        params: ItemParamsSchema,
+        response: { 200: ItemSchema },
+      },
+    },
     async (request) => {
       const found = repository.findItem(request.params.id);
       if (!found) throw new AppError(404, 'NOT_FOUND', 'Item not found');
@@ -58,7 +78,13 @@ export const catalogRoutes: FastifyPluginAsyncZod<{ repository: CatalogRepositor
     '/items/:id/playback',
     {
       preHandler: app.authenticate,
-      schema: { params: ItemParamsSchema, response: { 200: PlaybackResponseSchema } },
+      schema: {
+        tags: ['catalog'],
+        summary: 'Stream URL, for entitled users only',
+        security: [{ bearerAuth: [] }],
+        params: ItemParamsSchema,
+        response: { 200: PlaybackResponseSchema },
+      },
     },
     async (request, reply) => {
       const found = repository.findItem(request.params.id);
