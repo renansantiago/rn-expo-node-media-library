@@ -41,6 +41,17 @@ describe('LoginScreen', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
   });
 
+  it('toggles password visibility with the eye button', async () => {
+    await renderWithProviders(<LoginScreen onSuccess={jest.fn()} />);
+    expect(screen.getByLabelText('Password')).toHaveProp('secureTextEntry', true);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Show password' }));
+    expect(screen.getByLabelText('Password')).toHaveProp('secureTextEntry', false);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Hide password' }));
+    expect(screen.getByLabelText('Password')).toHaveProp('secureTextEntry', true);
+  });
+
   it('explains connectivity problems with a support reference', async () => {
     server.use(http.post(`${TEST_API_URL}/v1/auth/login`, () => HttpResponse.error()));
     await renderWithProviders(<LoginScreen onSuccess={jest.fn()} />);

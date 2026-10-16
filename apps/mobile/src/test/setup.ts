@@ -35,6 +35,16 @@ jest.mock('expo-video', () => {
   };
 });
 
+// Icon fonts are bundled assets Jest can't load; render the glyph name instead.
+jest.mock('@expo/vector-icons/Ionicons', () => {
+  const { createElement } = jest.requireActual('react');
+  const { Text } = jest.requireActual('react-native');
+  return {
+    __esModule: true,
+    default: ({ name }: { name: string }) => createElement(Text, null, name),
+  };
+});
+
 // Any request without a handler fails the test instead of silently hitting the network.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {

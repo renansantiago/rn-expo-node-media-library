@@ -1,11 +1,22 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Button } from '../../components/Button';
 import { Screen } from '../../components/Screen';
 import { colors, spacing } from '../../components/theme';
 import { HttpError } from '../../lib/api';
 import { toUserFacingError } from '../../lib/user-facing-error';
 import { useAuth } from './AuthProvider';
+
+const EYE_ICON_SIZE = 22;
 
 interface Props {
   onSuccess: () => void;
@@ -15,6 +26,7 @@ export function LoginScreen({ onSuccess }: Props) {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,17 +70,34 @@ export function LoginScreen({ onSuccess }: Props) {
             style={styles.input}
           />
           <Text style={styles.label}>Password</Text>
-          <TextInput
-            accessibilityLabel="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoComplete="password"
-            textContentType="password"
-            returnKeyType="go"
-            onSubmitEditing={() => void submit()}
-            style={styles.input}
-          />
+          <View style={styles.passwordField}>
+            <TextInput
+              accessibilityLabel="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="password"
+              textContentType="password"
+              returnKeyType="go"
+              onSubmitEditing={() => void submit()}
+              style={[styles.input, styles.passwordInput]}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+              onPress={() => setPasswordVisible((visible) => !visible)}
+              hitSlop={spacing.sm}
+              style={styles.visibilityToggle}
+            >
+              <Ionicons
+                name={passwordVisible ? 'eye-off-outline' : 'eye-outline'}
+                size={EYE_ICON_SIZE}
+                color={colors.textMuted}
+              />
+            </Pressable>
+          </View>
           {error ? (
             <Text style={styles.error} accessibilityRole="alert">
               {error}
@@ -102,6 +131,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
   },
+  passwordField: { justifyContent: 'center' },
+  // Keeps typed text clear of the eye button.
+  passwordInput: { paddingRight: spacing.md * 2 + EYE_ICON_SIZE },
+  visibilityToggle: { position: 'absolute', right: spacing.md },
   error: { color: colors.danger, marginVertical: spacing.sm },
   hint: { marginTop: spacing.lg, fontSize: 13, color: colors.textMuted, textAlign: 'center' },
 });
